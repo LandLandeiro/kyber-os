@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 88 96" width="176" height="192" role="img" aria-label="KYBER carregando">
+<defs>
+ <clipPath id="ka"><polygon points="44,0 88,24 88,72 44,96 0,72 0,24"></polygon></clipPath>
+ <clipPath id="kaSlit"><rect x="40" y="0" width="8" height="96"></rect></clipPath>
+</defs>
+<g clip-path="url(#ka)">
+ <polygon points="44,0 88,24 88,72 44,96 0,72 0,24" fill="#2C3336"></polygon><polygon points="44,10.6 78.3,29.3 78.3,66.7 44,85.4 9.7,66.7 9.7,29.3" fill="#4A5357"></polygon><polygon points="44,23 66.9,35.5 66.9,60.5 44,73 21.1,60.5 21.1,35.5" fill="#7F888C"></polygon><rect x="36" y="0" width="16" height="96" fill="#0A0D0E"></rect>
+ <g clip-path="url(#kaSlit)">
+  <rect x="40" width="8" height="96" fill="#FF8246">
+   
+  </rect>
+ </g>
+</g>
+</svg>

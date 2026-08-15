@@ -1,0 +1,262 @@
+/* =====================================================================
+   KYBER — chrome
+   Header, régua ESTADO DA MÁQUINA e rodapé.
+   Referência de pixel: telas/kyber-09---configuracoes.html.
+   Nenhum hex literal: tudo vem de tokens.css.
+   ===================================================================== */
+
+.chrome {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-screen);
+}
+
+/* ---------------------------------------------------------------------
+   Header — KYBER | NOME DA TELA à esquerda; telemetria à direita.
+   --------------------------------------------------------------------- */
+.chrome--header {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--chrome-line);
+}
+
+.header__id {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-card);
+}
+
+.header__wordmark {
+  font: 700 26px/1 var(--font-display);
+  letter-spacing: -.02em;
+  color: var(--text-hi);
+}
+
+.header__screen {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-mid);
+}
+
+.header__telemetry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-block);
+  font: 400 var(--label-m)/1 var(--font-data);
+  color: var(--text-mid);
+}
+
+/* Indicador de jogo vivo — orçamento de âmbar: SÓ o ponto é saturado.
+   O nome do jogo vai em text-mid, no mesmo peso de CONTROLE 1 / CPU / GPU. */
+.header__live {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.header__live-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--state-hot);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--state-hot) 55%, transparent);
+  animation: kyber-live-pulse 2.4s var(--ease) infinite;
+}
+
+.header__live-name {
+  letter-spacing: .1em;
+  color: var(--text-mid);
+}
+
+.header__clock { color: var(--text-hi); }
+
+/* ---------------------------------------------------------------------
+   Medidor de passo da primeira execução
+   --------------------------------------------------------------------- */
+.header__steps {
+  align-items: center;
+  gap: 26px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  color: var(--text-low);
+}
+
+.header__step-bars { display: flex; align-items: center; gap: 14px; }
+
+.header__step-bars span {
+  width: 34px;
+  height: 5px;
+  background: var(--surface-2);
+}
+
+.header__step-bars span[data-done="true"] { background: var(--text-hi); }
+
+.header__step-label {
+  letter-spacing: .16em;
+  color: var(--text-mid);
+}
+
+/* Pulso lento permitido apenas em atividade em curso (jogo vivo). */
+@keyframes kyber-live-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+
+/* ---------------------------------------------------------------------
+   Régua ESTADO DA MÁQUINA — elemento assinatura.
+   Única cor saturada da faixa: o cursor + o nome do nível contam como
+   uma ocorrência só, porque são o mesmo sinal.
+   --------------------------------------------------------------------- */
+.chrome--gauge {
+  gap: var(--sp-block);
+  border-bottom: 1px solid var(--chrome-line);
+
+  /* Nível padrão; sobrescrito pelos data-profile abaixo. */
+  --gauge-pos: 50%;
+  --gauge-color: var(--state-nominal);
+}
+
+.chrome--gauge[data-profile="quiet"]   { --gauge-pos: 14%; --gauge-color: var(--state-quiet); }
+.chrome--gauge[data-profile="nominal"] { --gauge-pos: 50%; --gauge-color: var(--state-nominal); }
+.chrome--gauge[data-profile="hot"]     { --gauge-pos: 86%; --gauge-color: var(--state-hot); }
+
+.gauge__label {
+  flex: none;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-low);
+}
+
+.gauge__track {
+  flex: 1;
+  position: relative;
+  height: 42px;
+}
+
+.gauge__ticks {
+  position: absolute;
+  inset: 0;
+  border-top: 1px solid var(--tick);
+  border-bottom: 1px solid var(--tick);
+  background-image: repeating-linear-gradient(
+    90deg, var(--tick) 0 1px, transparent 1px 14px
+  );
+}
+
+.gauge__third {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--tick-strong);
+}
+.gauge__third--1 { left: 33.33%; }
+.gauge__third--2 { left: 66.66%; }
+
+/* O cursor é a única coisa do sistema que se move sozinha.
+   320ms com a curva do token comunica a magnitude da mudança de perfil.
+   Antes da primeira resolução não há transição: a régua assume a posição
+   real de uma vez, em vez de deslizar do valor de marcação estática. */
+.chrome--gauge:not([data-ready]) .gauge__cursor,
+.chrome--gauge:not([data-ready]) .gauge__profile { transition: none; }
+
+.gauge__cursor {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 6px;
+  left: calc(var(--gauge-pos) - 3px);
+  background: var(--gauge-color);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--gauge-color) 45%, transparent);
+  transition: left var(--dur-gauge) var(--ease),
+              background var(--dur-gauge) var(--ease),
+              box-shadow var(--dur-gauge) var(--ease);
+}
+
+.gauge__readout {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.gauge__profile {
+  min-width: 200px;
+  text-align: right;
+  font: 500 24px/1 var(--font-data);
+  letter-spacing: .14em;
+  color: var(--gauge-color);
+  transition: color var(--dur-gauge) var(--ease);
+}
+
+.gauge__watts {
+  min-width: 110px;
+  text-align: right;
+  font: 400 24px/1 var(--font-data);
+  color: var(--text-mid);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header__live-dot { animation: none; }
+}
+
+/* ---------------------------------------------------------------------
+   Rodapé — botões contextuais à esquerda, contexto técnico à direita.
+   --------------------------------------------------------------------- */
+.chrome--footer {
+  border-top: 1px solid var(--chrome-line);
+}
+
+.footer__hints {
+  display: flex;
+  align-items: center;
+  gap: 44px;
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-key);
+}
+
+/* Botão físico: círculo vazado com a letra dentro. */
+.hint__glyph {
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--text-hi);
+}
+
+/* Caixa óptica única: o símbolo desenhado e a etiqueta ocupam a mesma
+   altura, para que trocar PlayStation por Xbox não mova a legenda ao
+   lado nem mude o peso da linha. */
+.hint__glyph .glifo--face { width: 34px; height: 34px; }
+
+.hint__glyph .glifo--etiqueta {
+  min-height: 34px;
+  min-width: 46px;
+  padding: 0 9px;
+  border-color: var(--text-low);
+  font-size: var(--label-s);
+}
+
+.hint__label {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .14em;
+  color: var(--text-mid);
+}
+
+.footer__context {
+  margin-left: auto;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .14em;
+  color: var(--text-low);
+}
+
+/* Legenda de botão que não leva a lugar nenhum ainda. Regra do projeto:
+   botão morto não pode parecer vivo. */
+.hint[data-disabled="true"] { opacity: .45; }
+
+/* Gravação sem símbolo próprio (LB, R1, PS, GUIDE) é retângulo. */
+/* Anúncio temporário de stub no lugar do contexto técnico. Sem cor: o
+   orçamento de saturação da tela já está gasto no ponto e na régua. */
+.footer__context[data-alert="true"] { color: var(--text-hi); }

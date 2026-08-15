@@ -1,0 +1,301 @@
+/* =====================================================================
+   KYBER — tela 17 · Jogo em execução
+
+   Orçamento vertical:  bloco EM EXECUÇÃO 446 + corpo 404 = 850
+   ===================================================================== */
+
+.running__head {
+  height: 446px;
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 1.32fr;
+  border-bottom: 1px solid var(--chrome-line);
+}
+
+.running__text {
+  position: relative;
+  z-index: 2;
+  padding: 40px var(--sp-screen) 38px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--void);
+}
+
+.running__badge {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: auto;
+}
+
+/* Ponto acromático: o âmbar do estado vivo é do header, e gastá-lo de
+   novo aqui estouraria o orçamento da tela. */
+.running__dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--text-hi);
+}
+
+.running__state {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .22em;
+  color: var(--text-hi);
+}
+
+.running__meta {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-low);
+}
+
+/* O display desta tela. */
+.running__title {
+  font: 700 116px/0.86 var(--font-display);
+  letter-spacing: -.045em;
+  color: var(--text-hi);
+  margin-bottom: 26px;
+  max-width: 12ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.running__counters {
+  display: flex;
+  align-items: flex-end;
+  gap: 30px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line-dim);
+}
+
+.running__label {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-low);
+  margin-bottom: 10px;
+}
+
+/* Cronômetro: mono de largura fixa para o número não pular de largura a
+   cada segundo. */
+.running__clock,
+.running__total {
+  font: 400 var(--data-xl)/0.9 var(--font-data);
+  letter-spacing: var(--track-data-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-hi);
+}
+
+.running__total { color: var(--text-mid); }
+
+.running__rule {
+  width: 1px;
+  height: 56px;
+  background: var(--line-dim);
+}
+
+/* ---------------------------------------------------------------------
+   Capa e telemetria
+   --------------------------------------------------------------------- */
+.running__panel {
+  position: relative;
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+}
+
+.running__art,
+.running__art > * {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.running__art > img { object-fit: cover; }
+
+.running__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--void) 0%, transparent 26%);
+}
+
+.running__panel .corner--tl { left: 36px; top: 32px; }
+
+.running__noart {
+  position: absolute;
+  right: 36px;
+  top: 30px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .2em;
+  color: var(--text-low);
+}
+
+/* OPACO sobre a capa. Vidro aqui seria vidro sobre fundo que não é
+   nosso — e a medição diz que painel translúcido sobre capa clara não
+   passa no contraste do rótulo secundário. */
+.telemetry {
+  position: absolute;
+  right: 36px;
+  bottom: 34px;
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-6);
+}
+
+.telemetry__cell {
+  padding: 18px 26px;
+  border-right: 1px solid var(--line-dim);
+}
+.telemetry__cell:last-child { border-right: none; }
+
+.telemetry__label {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-low);
+  margin-bottom: 9px;
+}
+
+.telemetry__value {
+  font: 400 34px/1 var(--font-data);
+  color: var(--text-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------
+   Corpo — ações à esquerda, biblioteca à direita
+   --------------------------------------------------------------------- */
+.running__body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1.32fr;
+}
+
+.running__side {
+  padding: 34px var(--sp-screen) 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--chrome-line);
+  min-width: 0;
+}
+
+.running__actions {
+  display: flex;
+  gap: var(--sp-btn);
+  margin-bottom: var(--sp-btn);
+}
+
+.running__actions .btn { height: 104px; }
+.running__actions .btn--primary { font-size: 36px; }
+.running__actions .btn[data-action="close"] { width: 290px; }
+
+.running__warn {
+  font: 400 var(--body-s)/1.4 var(--font-text);
+  color: var(--text-low);
+  max-width: 38ch;
+}
+
+.sessions {
+  margin-top: auto;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-dim);
+}
+
+.sessions__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-low);
+}
+
+.sessions__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 9px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.sessions__label {
+  font: 400 24px/1 var(--font-text);
+  color: var(--text-mid);
+}
+
+.sessions__value {
+  font: 400 24px/1 var(--font-data);
+  color: var(--text-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+.sessions__row--muted .sessions__label { color: var(--text-low); }
+.sessions__row--muted .sessions__value { color: var(--text-mid); }
+
+/* ---------------------------------------------------------------------
+   Prateleira menor — presente, secundária, ainda alcançável.
+   Só a capa cai para 40%; o nome fica legível, senão a lista vira
+   textura e deixa de ser navegável.
+   --------------------------------------------------------------------- */
+.running__library {
+  padding: 34px var(--sp-screen) 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.running__library-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-low);
+}
+
+.mini-shelf {
+  display: flex;
+  gap: 22px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Folga à direita para o anel do último card caber quando a lista
+     chega ao fim; à esquerda, a devolvida pela margem negativa. */
+  padding: 20px var(--sp-screen) 16px 12px;
+  margin-left: -12px;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.mini-shelf::-webkit-scrollbar { display: none; }
+
+.mini {
+  flex: none;
+  width: 168px;
+  border-radius: var(--r-6);
+  padding-bottom: 14px;
+  transition: opacity var(--dur-focus) var(--ease),
+              transform var(--dur-focus) var(--ease);
+}
+
+.mini__art {
+  width: 168px;
+  height: 168px;
+  border-radius: var(--r-6);
+  overflow: hidden;
+  background: var(--panel);
+  opacity: .4;
+}
+
+.mini:focus-visible .mini__art { opacity: .85; }
+
+.mini__name {
+  font: 500 var(--body-s)/1.2 var(--font-text);
+  color: var(--text-mid);
+  margin-top: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

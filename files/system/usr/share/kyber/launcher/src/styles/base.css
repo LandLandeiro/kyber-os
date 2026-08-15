@@ -1,0 +1,141 @@
+/* =====================================================================
+   KYBER — base
+   Reset mínimo, fontes e as faixas fixas que somam exatamente 1080px.
+   Nenhum hex literal: tudo vem de tokens.css.
+   ===================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;              /* nada rola por acidente */
+  background: var(--void);
+}
+
+body {
+  color: var(--text-hi);
+  font-family: var(--font-text);
+  font-size: var(--body-m);
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, p, figure { margin: 0; }
+
+/* O atributo `hidden` precisa vencer o display do componente. Sem isto um
+   `display: flex` na classe mantém o elemento na tela — foi o que deixou o
+   indicador de jogo vivo aceso com a sessão vazia. */
+[hidden] { display: none !important; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+button, input { font: inherit; color: inherit; background: none; border: 0; }
+img { display: block; max-width: 100%; }
+
+/* Nada depende de cursor: o foco é dirigido, o ponteiro não existe. */
+* { cursor: none; }
+[tabindex] { outline: none; }
+::selection { background: none; }
+
+/* ---------------------------------------------------------------------
+   Wrapper raiz — 1920×1080 absolutos.
+   A janela real é atendida por transform: scale() com origem no
+   topo-esquerda; a escala tipográfica em px permanece intacta.
+   O centramento é feito pelo deslocamento em --app-x / --app-y, aplicado
+   ANTES da escala para não ser multiplicado por ela.
+   --------------------------------------------------------------------- */
+.app {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  display: flex;
+  flex-direction: column;
+  background: var(--void);
+  overflow: hidden;
+
+  --app-scale: 1;
+  --app-x: 0px;
+  --app-y: 0px;
+  transform: translate(var(--app-x), var(--app-y)) scale(var(--app-scale));
+  transform-origin: 0 0;
+}
+
+/* ---------------------------------------------------------------------
+   Faixas fixas — 76 + 78 + 850 + 76 = 1080. Lei em toda tela de conteúdo.
+   Sem régua (overlays, boot), o conteúdo assume 928px via [data-no-gauge].
+   --------------------------------------------------------------------- */
+.chrome--header { height: var(--h-header); flex: none; }
+.chrome--gauge  { height: var(--h-gauge);  flex: none; }
+.screen         { height: var(--h-content); flex: none; position: relative; overflow: hidden; }
+.chrome--footer { height: var(--h-footer); flex: none; }
+
+/* ---------------------------------------------------------------------
+   Pilha de telas. Toda tela ocupa a faixa inteira de conteúdo e se
+   empilha no mesmo lugar; a de baixo continua montada e invisível.
+
+   `visibility` e não `display`: sem caixa de layout o navegador zera o
+   scrollLeft da prateleira, e voltar da ficha perderia a posição em que
+   a biblioteca estava. O foco não vaza para a tela escondida porque o
+   router a mantém fora do escopo (trap do focus.js).
+   --------------------------------------------------------------------- */
+.screen__page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.screen__page[data-hidden="true"] { visibility: hidden; }
+
+/* ---------------------------------------------------------------------
+   Modos de chrome.
+
+     full  header com telemetria + régua + rodapé — toda tela de conteúdo
+     boot  header reduzido (KYBER + fase + medidor de passo), SEM régua e
+           com rodapé. É o que a identidade manda para a primeira
+           execução e seus passos: 1080 − 76 − 76 = 928 de conteúdo.
+     bare  nada de chrome. Só o splash, que não é tela do launcher.
+
+   A tela declara o modo (`chrome: 'boot'`) e o router aplica; quem não
+   declara volta a `full` sozinha.
+   --------------------------------------------------------------------- */
+.app[data-chrome-mode="boot"] .chrome--gauge,
+.app[data-chrome-mode="boot"] .header__telemetry { display: none; }
+.app[data-chrome-mode="boot"] .screen { height: var(--h-content-no-gauge); }
+
+.app[data-chrome-mode="bare"] .chrome--header,
+.app[data-chrome-mode="bare"] .chrome--gauge,
+.app[data-chrome-mode="bare"] .chrome--footer { display: none; }
+.app[data-chrome-mode="bare"] .screen { height: 1080px; }
+
+/* O medidor de passo só existe no modo de boot. */
+.header__steps { display: none; }
+.app[data-chrome-mode="boot"] .header__steps { display: flex; }
+
+/* Faixa de textura: o que a identidade manda pôr onde uma lista foi
+   cortada por decisão. Listra de 1px a cada 26px sobre o void. */
+.texture {
+  background-image:
+    repeating-linear-gradient(90deg, var(--hairline) 0 1px, transparent 1px 26px);
+}
+
+/* Marca de canto: enquadramento de instrumento, não decoração. Cada tela
+   posiciona; o desenho é o mesmo em toda parte. */
+.corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  opacity: .3;
+  pointer-events: none;
+}
+.corner--tl { border-left: 1px solid var(--text-hi); border-top: 1px solid var(--text-hi); }
+.corner--br { border-right: 1px solid var(--text-hi); border-bottom: 1px solid var(--text-hi); }
+
+/* Divisória vertical do chrome — três alturas em uso. */
+.rule-v { flex: none; width: 1px; background: var(--line); }
+.rule-v--22 { height: 22px; }
+.rule-v--26 { height: 26px; }
+.rule-v--30 { height: 30px; }

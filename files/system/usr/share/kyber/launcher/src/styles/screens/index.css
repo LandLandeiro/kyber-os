@@ -1,0 +1,125 @@
+/* =====================================================================
+   KYBER — tela 01b · Índice (Direção B)
+
+   Orçamento vertical exato:
+     cabeçalho de coluna    58
+     9 linhas × 88         792
+                          ────
+                           850
+   Os títulos além da nona chegam pela rolagem dirigida pelo foco.
+   ===================================================================== */
+
+.index {
+  --index-cols: 132px 1fr 200px 130px 190px 260px;
+  --index-row: var(--hit-row);        /* 88px */
+}
+
+.index__head {
+  height: 58px;
+  flex: none;
+  display: grid;
+  grid-template-columns: var(--index-cols);
+  align-items: center;
+  padding: 0 var(--sp-screen);
+  border-bottom: 1px solid var(--line);
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-low);
+}
+
+.index__right { text-align: right; }
+
+/* Rola por decisão do foco, nunca por acidente e nunca com barra: não há
+   ponteiro para arrastar barra nenhuma. */
+.index__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.index__list::-webkit-scrollbar { display: none; }
+
+/* ---------------------------------------------------------------------
+   Linha invertível.
+
+   ARMADILHA: cor fixa em filho sobrevive à inversão e desaparece no
+   branco. Todo texto daqui é `color: inherit` e toda diferença de peso
+   é `opacity` — inclusive a barra de nível, que pinta com currentColor.
+   --------------------------------------------------------------------- */
+.index__row {
+  display: grid;
+  grid-template-columns: var(--index-cols);
+  align-items: center;
+  height: var(--index-row);
+  padding: 0 var(--sp-screen);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text-mid);
+}
+
+.index__id {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: inherit;
+}
+
+.index__thumb {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  border-radius: var(--r-3);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.index__n {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .1em;
+  color: inherit;
+  opacity: .70;
+}
+
+.index__title {
+  font: 600 var(--title-row)/1 var(--font-display);
+  letter-spacing: var(--track-title-row);
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: var(--sp-card);
+}
+
+.index__genre {
+  font: 400 var(--body-s)/1 var(--font-data);
+  color: inherit;
+  opacity: .8;
+}
+
+.index__hours {
+  font: 400 24px/1 var(--font-data);
+  text-align: right;
+  color: inherit;
+}
+
+.index__last {
+  font: 400 var(--body-s)/1 var(--font-data);
+  text-align: right;
+  color: inherit;
+  opacity: .8;
+}
+
+.index__profile {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  color: inherit;
+}
+
+.index__level {
+  font: 400 var(--body-s)/1 var(--font-data);
+  letter-spacing: .1em;
+  color: inherit;
+}

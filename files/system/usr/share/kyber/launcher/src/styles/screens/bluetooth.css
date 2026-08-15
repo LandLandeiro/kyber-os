@@ -1,0 +1,127 @@
+/* =====================================================================
+   KYBER — tela 16b · Bluetooth (painel da seção)
+   ===================================================================== */
+
+.bt { display: flex; flex-direction: column; }
+
+.bt__label {
+  flex: none;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .2em;
+  color: var(--text-low);
+  margin-bottom: 16px;
+}
+
+.bt__label--spaced { margin-top: 26px; }
+
+/* ---------------------------------------------------------------------
+   Controle reportado pela Gamepad API
+   --------------------------------------------------------------------- */
+.bt-row {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 260px 240px 200px;
+  align-items: center;
+  gap: var(--sp-card);
+  padding: 0 24px;
+  height: 116px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--panel);
+  margin-bottom: 12px;
+  transition: opacity var(--dur-focus) var(--ease),
+              transform var(--dur-focus) var(--ease);
+}
+
+.bt-row__name {
+  font: 600 32px/1.1 var(--font-display);
+  letter-spacing: var(--track-title-row);
+  color: var(--text-hi);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bt-row__meta {
+  font: 400 var(--label-s)/1 var(--font-data);
+  letter-spacing: .12em;
+  color: var(--text-low);
+  margin-top: 8px;
+}
+
+.bt-row__label {
+  font: 400 var(--label-s)/1 var(--font-data);
+  letter-spacing: .14em;
+  color: var(--text-low);
+  margin-bottom: 10px;
+}
+
+.bt-row__value {
+  font: 400 var(--body-m)/1 var(--font-data);
+  color: var(--text-hi);
+}
+
+/* Dado que o navegador não entrega não vira número inventado. */
+.bt-row__value--unknown { color: var(--text-low); }
+
+.bt-row__action { display: flex; justify-content: flex-end; }
+
+.bt__note {
+  flex: none;
+  font: 400 var(--body-s)/1.4 var(--font-text);
+  color: var(--text-low);
+  margin-top: 4px;
+  max-width: 72ch;
+}
+
+/* ---------------------------------------------------------------------
+   Outros dispositivos do rádio
+   --------------------------------------------------------------------- */
+.bt-device {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 96px;
+  border: 1px solid var(--line-dim);
+  border-radius: var(--r-3);
+  background: transparent;
+  margin-bottom: 12px;
+  opacity: .8;
+  transition: opacity var(--dur-focus) var(--ease),
+              transform var(--dur-focus) var(--ease);
+}
+
+.bt-device:focus-visible { opacity: 1; }
+
+.bt-device__name {
+  font: 500 30px/1.1 var(--font-text);
+  color: var(--text-mid);
+}
+
+.bt-device__meta {
+  font: 400 var(--label-s)/1 var(--font-data);
+  letter-spacing: .12em;
+  color: var(--text-low);
+  margin-top: 8px;
+}
+
+.bt-device__signal {
+  font: 400 var(--body-s)/1 var(--font-data);
+  letter-spacing: .1em;
+  color: var(--text-low);
+}
+
+/* Faixa de estado vazio: textura com resumo, nunca buraco. */
+.bt-empty {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  height: 116px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-low);
+}

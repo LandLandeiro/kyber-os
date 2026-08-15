@@ -1,0 +1,35 @@
+[Unit]
+Description=KYBER launcher — servidor estático local
+Documentation=https://github.com/LandLandeiro/kyber-os
+# O launcher é servido por HTTP em loopback e nunca por file://. São 38 módulos
+# ES e um fetch(); origem file:// é opaca, o CORS do navegador bloqueia os dois
+# e a sessão abriria numa tela branca.
+After=local-fs.target
+Before=display-manager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/darkhttpd /usr/share/kyber/launcher \
+    --addr 127.0.0.1 --port 8787 \
+    --index index.html --no-listing
+Restart=always
+RestartSec=1
+
+User=nobody
+Group=nobody
+
+# Serve estático de /usr e nada além disso.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

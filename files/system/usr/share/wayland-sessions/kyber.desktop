@@ -1,0 +1,7 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=KYBER
+Comment=Console KYBER — launcher sobre gamescope
+Exec=gamescope-session-plus kyber
+Type=Application
+DesktopNames=gamescope

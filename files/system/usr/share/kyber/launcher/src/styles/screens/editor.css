@@ -1,0 +1,198 @@
+/* =====================================================================
+   KYBER — tela 04 · Editor de perfil de performance
+   ===================================================================== */
+
+.editor {
+  display: grid;
+  grid-template-columns: 1.45fr 1fr;
+}
+
+.editor__left {
+  padding: 44px 44px 40px var(--sp-screen);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.editor__kicker {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-low);
+  margin-bottom: 12px;
+}
+
+/* O display desta tela. */
+.editor__title {
+  font: 600 var(--display-s)/1 var(--font-display);
+  letter-spacing: var(--track-display-s);
+  color: var(--text-hi);
+  margin-bottom: 30px;
+}
+
+.groups { display: flex; flex-direction: column; gap: 22px; }
+
+.group {
+  border-top: 1px solid var(--line-dim);
+  padding-top: 18px;
+}
+
+.group__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-btn);
+  margin-bottom: 14px;
+}
+
+.group__label {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-low);
+}
+
+/* O mecanismo real do sistema, com o nome que ele tem. */
+.group__hint {
+  font: 400 var(--label-m)/1 var(--font-text);
+  color: var(--text-low);
+}
+
+.group__row { display: flex; gap: 10px; }
+
+.opt-btn {
+  flex: 1;
+  min-width: 0;
+  height: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--panel);
+  opacity: .82;
+  transition: opacity var(--dur-focus) var(--ease),
+              transform var(--dur-focus) var(--ease);
+}
+
+.opt-btn:focus-visible { opacity: 1; }
+
+/* LED aceso marca o valor em uso. Luminância, não cor: a rampa de estado
+   é da régua e da leitura, e nem essas usam — ver abaixo. */
+.opt-btn__led {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 1px solid var(--tick-strong);
+  border-radius: 2px;
+}
+
+.opt-btn[data-on="true"] .opt-btn__led { background: var(--text-hi); }
+
+.opt-btn__name {
+  font: 400 var(--body-m)/1 var(--font-data);
+  letter-spacing: .04em;
+  color: var(--text-mid);
+  white-space: nowrap;
+}
+
+.opt-btn[data-on="true"] .opt-btn__name { color: var(--text-hi); }
+
+/* ---------------------------------------------------------------------
+   Leitura em tempo real — painel OPACO, como todo painel de telemetria.
+
+   Nível e barra ficam acromáticos: a régua logo acima já carrega a cor
+   para exatamente este valor, e o orçamento de saturação por tela não
+   comporta os dois. Mesmo tratamento da ficha (02) e do overlay de
+   lançamento (03).
+   --------------------------------------------------------------------- */
+.reading {
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  padding: 44px var(--sp-screen) 40px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.reading__kicker {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-low);
+  margin-bottom: 22px;
+}
+
+.reading__level {
+  font: 600 64px/1 var(--font-display);
+  letter-spacing: var(--track-display-s);
+  color: var(--text-hi);
+  margin-bottom: 10px;
+}
+
+.reading__track {
+  height: 14px;
+  background: var(--surface-2);
+  margin-bottom: 34px;
+  overflow: hidden;
+}
+
+/* 280ms com a curva do token: é a mesma magnitude que o cursor da régua
+   está percorrendo, e os dois têm que sair juntos. */
+.reading__fill {
+  width: 0;
+  height: 100%;
+  background: var(--text-hi);
+  transition: width var(--dur-gauge) var(--ease);
+}
+
+.reading__watts {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+
+.reading__watts-value {
+  font: 400 76px/0.9 var(--font-data);
+  letter-spacing: -.03em;
+  color: var(--text-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+.reading__watts-unit {
+  font: 400 var(--data-m)/1.6 var(--font-data);
+  color: var(--text-low);
+}
+
+.reading__source {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .14em;
+  color: var(--text-low);
+  margin-bottom: 34px;
+}
+
+.reading__rows { border-top: 1px solid var(--line-dim); }
+
+.reading__row {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line-dim);
+}
+
+.reading__row span:first-child {
+  font: 400 var(--body-m)/1 var(--font-text);
+  color: var(--text-mid);
+}
+
+.reading__row span:last-child {
+  font: 400 var(--body-m)/1 var(--font-data);
+  color: var(--text-hi);
+}
+
+.reading__actions {
+  margin-top: auto;
+  display: flex;
+  gap: 14px;
+}
+
+.reading__actions .btn { height: 88px; }
+.reading__actions .btn--primary { flex: 1; font-size: 30px; }
+.reading__actions .btn--quiet { flex: none; width: 150px; background: transparent; }

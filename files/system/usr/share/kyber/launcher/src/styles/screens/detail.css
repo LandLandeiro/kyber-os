@@ -1,0 +1,254 @@
+/* =====================================================================
+   KYBER — tela 02 · Ficha do título
+   ===================================================================== */
+
+.detail {
+  display: grid;
+  grid-template-columns: 700px 1fr;
+}
+
+/* ---------------------------------------------------------------------
+   Enquadramento da capa. A arte aparece na proporção real, sem corte:
+   uma faixa de 850px de altura é larga demais para um retrato 2:3, e
+   encaixar à força cortaria metade da capa. A folga em volta vira
+   estrutura por causa das marcas de canto — área vazia com intenção.
+   --------------------------------------------------------------------- */
+.detail__frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  border-right: 1px solid var(--line);
+  background: var(--void);
+}
+
+.detail__frame .corner--tl { left: 36px; top: 36px; }
+.detail__frame .corner--br { right: 36px; bottom: 36px; }
+
+.detail__cover {
+  width: 480px;
+  height: 720px;          /* 2:3 exato — a capa da loja não é cortada */
+  flex: none;
+  border-radius: var(--r-6);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.detail__source {
+  /* Alinhado à aresta esquerda da capa, não centrado: legenda de
+     instrumento pertence à peça que legenda. */
+  width: 480px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-low);
+}
+
+/* ---------------------------------------------------------------------
+   Ficha
+   --------------------------------------------------------------------- */
+.detail__sheet {
+  padding: 48px var(--sp-screen) 40px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.detail__meta {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-low);
+  margin-bottom: 18px;
+}
+
+/* O display desta tela. Um por tela. */
+.detail__title {
+  font: 700 var(--display-m)/0.94 var(--font-display);
+  letter-spacing: var(--track-display-m);
+  color: var(--text-hi);
+  margin-bottom: 22px;
+}
+
+.detail__desc {
+  font: 400 var(--body-m)/1.45 var(--font-text);
+  color: var(--text-mid);
+  max-width: 46ch;
+  margin-bottom: 18px;
+  /* Rede de segurança: descrição longa não pode empurrar os botões para
+     fora dos 850px. Corte por decisão, nunca por acidente. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.detail__sub {
+  font: 400 var(--body-s)/1 var(--font-text);
+  color: var(--text-low);
+  margin-bottom: 28px;
+}
+
+/* ---------------------------------------------------------------------
+   Painel de perfil de performance — OPACO, sempre. Painel de telemetria
+   nunca é vidro: o rótulo secundário não passaria no contraste, e vidro
+   que passa no contraste deixou de ser vidro.
+   --------------------------------------------------------------------- */
+.profile {
+  border: 1px solid var(--line);
+  border-radius: var(--r-6);
+  background: var(--surface-1);
+  margin-bottom: auto;
+  overflow: hidden;
+}
+
+.profile__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--line-dim);
+}
+
+.profile__title {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-low);
+}
+
+.profile__level {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-hi);
+}
+
+.profile__level-name {
+  font: 500 var(--label-m)/1 var(--font-data);
+  letter-spacing: .14em;
+  color: inherit;
+}
+
+.profile__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.profile__cell { padding: 18px 22px; }
+.profile__cell:nth-child(odd)  { border-right: 1px solid var(--line-dim); }
+.profile__cell:nth-child(-n+2) { border-bottom: 1px solid var(--line-dim); }
+
+.profile__label {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .14em;
+  color: var(--text-low);
+  margin-bottom: 9px;
+}
+
+.profile__value {
+  font: 400 var(--data-m)/1 var(--font-data);
+  color: var(--text-hi);
+}
+
+.profile__foot {
+  padding: 16px 22px;
+  border-top: 1px solid var(--line-dim);
+  font: 400 var(--body-s)/1.3 var(--font-text);
+  color: var(--text-low);
+}
+
+/* Nível em três degraus de luminância — a rampa de estado é da régua.
+   `currentColor` para sobreviver a qualquer fundo, inclusive inversão. */
+.steps { display: flex; gap: 4px; }
+
+.step {
+  width: 14px;
+  height: 10px;
+  background: currentColor;
+  opacity: .22;
+}
+.step--on { opacity: 1; }
+
+.steps--inherit { color: inherit; }
+
+/* ---------------------------------------------------------------------
+   Ações
+   --------------------------------------------------------------------- */
+.actions {
+  display: flex;
+  gap: var(--sp-btn);
+  margin-top: var(--sp-block);
+}
+
+.btn {
+  height: var(--hit-btn);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-6);
+  background: var(--panel);
+  color: var(--text-hi);
+  font: 400 var(--body-m)/1 var(--font-data);
+  letter-spacing: .06em;
+  opacity: .86;
+  transition: opacity var(--dur-focus) var(--ease),
+              transform var(--dur-focus) var(--ease);
+}
+
+.btn:focus-visible { opacity: 1; }
+
+/* Ação primária: UM TRATAMENTO, UM SIGNIFICADO.
+
+   Era `background: var(--text-hi)`, com a justificativa de que text-hi
+   não é focus. A três metros os dois são o mesmo branco, e o botão em
+   repouso passava a afirmar "estou aqui" ao lado de um anel de foco que
+   estava em outro lugar da tela — na 04, duas primárias brancas ao
+   mesmo tempo, nenhuma focada.
+
+   A hierarquia não morava no preenchimento: mora na silhueta. A
+   primária é a mais larga (`flex: 1` contra 300 e 150 px) e a única em
+   Familjen Grotesk 600 no meio de mono. Isso se lê antes da cor. O
+   fundo agora é `surface-2`, que é a superfície de destaque do sistema,
+   e o branco volta a pertencer só ao foco. */
+.btn--primary {
+  flex: 1;
+  border: none;
+  background: var(--surface-2);
+  color: var(--text-hi);
+  font: 600 34px/1 var(--font-display);
+  letter-spacing: -.01em;
+}
+
+.btn--quiet { color: var(--text-mid); }
+
+.btn[data-action="profile"] { width: 300px; }
+.btn[data-action="back"]    { width: 150px; }
+
+/* Linha de conquistas: dado que a interface promete e ainda não tem
+   destino. Alcançável e honesta em vez de número decorativo. */
+.achievements-region { margin-top: 18px; }
+
+.achievements {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  min-height: var(--hit-min);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  color: var(--text-mid);
+}
+
+.achievements__label {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: inherit;
+  opacity: .8;
+}
+
+.achievements__value {
+  font: 400 var(--data-m)/1 var(--font-data);
+  color: inherit;
+}

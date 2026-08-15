@@ -1,0 +1,253 @@
+/* =====================================================================
+   KYBER — seções vivas do hub: 09b áudio, 09c rede, 09d aparência
+
+   Elas reusam `.sel`, `.opt` e `.panel__*` da folha do hub; aqui só o
+   que é próprio de cada uma.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   09b · saída de áudio — seletor com o nome do aparelho embaixo
+   --------------------------------------------------------------------- */
+.sel--device {
+  height: 100px;
+  justify-content: flex-start;
+  gap: 16px;
+  padding: 0 20px;
+}
+
+.sel--device__text { display: block; min-width: 0; }
+
+.sel--device__name {
+  display: block;
+  font: 400 var(--body-m)/1 var(--font-data);
+  color: var(--text-mid);
+  margin-bottom: 8px;
+}
+
+.sel[data-on="true"] .sel--device__name { color: var(--text-hi); }
+
+.sel--device__sub {
+  display: block;
+  font: 400 var(--label-s)/1 var(--font-data);
+  letter-spacing: .06em;
+  color: var(--text-low);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* O LED do seletor genérico passa a obedecer `data-on`, que é como as
+   seções vivas marcam o valor em uso. */
+.sel[data-on="true"] .sel__led {
+  border-color: var(--tick-strong);
+  background: var(--text-hi);
+}
+
+.sel[data-on="true"] .sel__name { color: var(--text-hi); }
+
+/* ---------------------------------------------------------------------
+   09c · rede
+   --------------------------------------------------------------------- */
+.net-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-6);
+  background: var(--panel);
+  padding: 28px 30px;
+  margin-bottom: 26px;
+}
+
+.net-card__row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-card);
+}
+
+.net-card__row--divided {
+  border-top: 1px solid var(--line-dim);
+  padding-top: 26px;
+}
+
+.net-card__id { min-width: 0; }
+
+.net-card__label {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .2em;
+  color: var(--text-low);
+  margin-bottom: 14px;
+}
+
+.net-card__ssid {
+  font: 700 52px/0.96 var(--font-display);
+  letter-spacing: var(--track-display-s);
+  color: var(--text-hi);
+  margin-bottom: 14px;
+}
+
+.net-card__ip {
+  font: 700 60px/0.94 var(--font-display);
+  letter-spacing: var(--track-display-s);
+  color: var(--text-hi);
+}
+
+.net-card__meta {
+  font: 400 var(--data-m)/1 var(--font-data);
+  letter-spacing: .06em;
+  color: var(--text-mid);
+  margin-top: 14px;
+}
+
+.net-card__stats { flex: none; display: flex; gap: 44px; text-align: right; }
+
+.net-stat__value {
+  font: 400 52px/0.9 var(--font-data);
+  letter-spacing: var(--track-data-lg);
+  color: var(--text-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+.net-stat__unit { font-size: 24px; color: var(--text-low); }
+
+.opt__head--between { justify-content: space-between; }
+
+.net-list {
+  border: 1px solid var(--line-dim);
+  border-radius: var(--r-3);
+  overflow: hidden;
+}
+
+.net-row {
+  display: grid;
+  grid-template-columns: 1fr 250px 200px;
+  align-items: center;
+  padding: 0 24px;
+  height: 86px;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text-mid);
+}
+.net-row:last-child { border-bottom: none; }
+
+.net-row__name {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font: 600 30px/1 var(--font-display);
+  letter-spacing: var(--track-title-row);
+  color: inherit;
+  min-width: 0;
+}
+
+/* Ponto cheio = rede em uso. currentColor para sobreviver à inversão. */
+.net-row__dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+}
+
+.net-row__dot--on { background: currentColor; }
+
+.net-row__sec {
+  font: 400 var(--body-s)/1 var(--font-data);
+  letter-spacing: .1em;
+  color: inherit;
+  opacity: .8;
+  white-space: nowrap;
+}
+
+.net-row__signal {
+  font: 400 24px/1 var(--font-data);
+  text-align: right;
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------------
+   09d · fresta de luz do gabinete
+
+   O único controle da interface que sai da tela, e a prévia usa o âmbar
+   de verdade: é a mesma cor no gabinete e no pixel — correspondência
+   intencional da identidade. Prévia acromática mentiria sobre o efeito.
+   --------------------------------------------------------------------- */
+.fresta {
+  border: 1px solid var(--line);
+  border-radius: var(--r-6);
+  background: var(--panel);
+  padding: 20px 26px;
+}
+
+.fresta__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-card);
+  margin-bottom: 14px;
+}
+
+.fresta__head .opt__head { margin-bottom: 0; }
+.fresta__label { color: var(--text-hi); }
+
+.fresta__badge {
+  flex: none;
+  white-space: nowrap;
+  font: 500 var(--label-s)/1 var(--font-data);
+  letter-spacing: .14em;
+  color: var(--text-hi);
+  border: 1px solid var(--text-low);
+  border-radius: 2px;
+  padding: 9px 14px;
+}
+
+.fresta__row { margin-bottom: 12px; }
+.fresta__row .sel { height: var(--hit-min); background: var(--void); }
+
+.fresta__preview {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-card);
+}
+
+.fresta__preview-label {
+  flex: none;
+  font: 400 var(--label-s)/1 var(--font-data);
+  letter-spacing: .16em;
+  color: var(--text-low);
+}
+
+/* Preto absoluto: é o gabinete no escuro, não a interface. */
+.fresta__slot {
+  flex: 1;
+  height: 30px;
+  position: relative;
+  overflow: hidden;
+  background: var(--void-abs);
+  border: 1px solid var(--hairline);
+}
+
+.fresta__light {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: var(--state-hot);
+  box-shadow: 0 0 18px 2px color-mix(in srgb, var(--state-hot) 42%, transparent);
+  transition: opacity var(--dur-gauge) var(--ease);
+}
+
+.fresta__value {
+  flex: none;
+  font: 400 var(--body-s)/1 var(--font-data);
+  letter-spacing: .1em;
+  color: var(--text-mid);
+}
+
+.aparencia__note {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-dim);
+  font: 400 var(--body-s)/1.4 var(--font-text);
+  color: var(--text-low);
+}
+
+.aparencia__note span { color: var(--text-mid); }

@@ -1,0 +1,96 @@
+/* =====================================================================
+   KYBER — tela 17b · Confirmação de fechar jogo
+   ===================================================================== */
+
+.confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm__panel {
+  width: 960px;
+  padding: 52px 56px 44px;
+}
+
+.confirm__kicker {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .24em;
+  color: var(--text-mid);
+  margin-bottom: 24px;
+}
+
+.confirm__title {
+  font: 700 64px/0.96 var(--font-display);
+  letter-spacing: var(--track-display-m);
+  color: var(--text-hi);
+  margin-bottom: 26px;
+}
+
+.confirm__desc {
+  font: 400 30px/1.42 var(--font-text);
+  color: var(--text-mid);
+  max-width: 30ch;
+  margin-bottom: 34px;
+}
+
+/* A tabela diz o que acontece. Diálogo destrutivo não pergunta se a
+   pessoa tem certeza — mostra a conta. */
+.consequences {
+  border-top: 1px solid var(--line-dim);
+  margin-bottom: 38px;
+}
+
+.consequence {
+  display: flex;
+  justify-content: space-between;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.consequence:last-child { border-bottom: none; }
+
+.consequence__label {
+  font: 400 24px/1 var(--font-data);
+  letter-spacing: .12em;
+  color: var(--text-low);
+}
+
+.consequence__value {
+  font: 400 24px/1 var(--font-data);
+  color: var(--text-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+.confirm__actions {
+  display: flex;
+  gap: var(--sp-btn);
+}
+
+.confirm__actions .btn {
+  flex: 1;
+  width: auto;
+  height: 100px;
+}
+
+.confirm__actions .btn--primary { font-size: 34px; }
+
+/* Fio de 4px na aresta esquerda: o terceiro uso de cor saturada que a
+   identidade permite, reservado a ação destrutiva. Um por tela. */
+.btn--destructive {
+  background: transparent;
+  border-left: 4px solid var(--state-hot);
+  font: 400 28px/1 var(--font-data);
+  letter-spacing: .06em;
+  color: var(--text-hi);
+}
+
+.confirm__hint {
+  margin-top: 22px;
+  text-align: center;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .14em;
+  color: var(--text-low);
+}

@@ -5,12 +5,16 @@ name: kyber
 # description will be included in the image's metadata
 description: >-
   KYBER OS — a dedicated gaming console built from a 3D-printed enclosure and a
-  custom image derived from Bazzite. This is the base image: Bazzite plus the
-  KYBER signing setup and file overlay, with no KYBER-specific software yet.
+  custom image derived from Bazzite. Boots straight into the KYBER launcher: a
+  gamescope session wrapping a kiosk browser, no desktop behind it.
 
 # the base image to build on top of (FROM) and the version tag to use
-# ghcr.io/ublue-os/bazzite already ships Steam, Proton, gamescope and GPU drivers
-base-image: ghcr.io/ublue-os/bazzite
+#
+# bazzite-deck, not bazzite: gamescope-session-plus and its sessions.d/ hook
+# live in Bazzite's `bazzite-deck` build stage only. That hook is the whole
+# reason the KYBER session is two declarative files instead of a session script
+# we would have to maintain ourselves.
+base-image: ghcr.io/ublue-os/bazzite-deck
 image-version: stable # Bazzite's recommended channel; `testing` and `unstable` also exist
 
 # module configuration, executed in order
@@ -20,5 +24,22 @@ modules:
     files:
       - source: system
         destination: / # copies files/system/* (* means everything inside it) into your image's root folder /
+
+  - type: dnf
+    install:
+      packages:
+        # Bazzite removes Firefox and ships it as a Flatpak, so the image has no
+        # browser to run in kiosk mode. Chromium has the most complete Gamepad
+        # API support of the packaged options, which the launcher depends on.
+        - chromium
+        # Serves the launcher over loopback. The launcher is 38 ES modules plus
+        # a fetch(); over file:// the browser's CORS rules block both and the
+        # screen stays blank. 63 KB installed.
+        - darkhttpd
+
+  - type: systemd
+    system:
+      enabled:
+        - kyber-launcher.service
 
   - type: signing # this sets up the proper policy & signing files for signed images to work fully

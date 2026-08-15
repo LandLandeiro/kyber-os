@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>KYBER</title>
+<link rel="icon" type="image/png" sizes="64x64" href="src/assets/logo/kyber-favicon-64.png">
+<link rel="icon" type="image/png" sizes="512x512" href="src/assets/logo/kyber-favicon-512.png">
+
+<!-- Tipografia local: o console desenha a primeira tela sem rede. -->
+<link rel="stylesheet" href="src/styles/fonts.css">
+
+<link rel="stylesheet" href="src/styles/tokens.css">
+<link rel="stylesheet" href="src/styles/base.css">
+<link rel="stylesheet" href="src/styles/glyphs.css">
+<link rel="stylesheet" href="src/styles/chrome.css">
+<link rel="stylesheet" href="src/styles/toast.css">
+<link rel="stylesheet" href="src/styles/calibrate.css">
+<link rel="stylesheet" href="src/styles/keyboard.css">
+<link rel="stylesheet" href="src/styles/steps-bar.css">
+<link rel="stylesheet" href="src/styles/loader.css">
+<link rel="stylesheet" href="src/styles/screens/sections.css">
+<link rel="stylesheet" href="src/styles/screens/boot.css">
+<link rel="stylesheet" href="src/styles/screens/library.css">
+<link rel="stylesheet" href="src/styles/screens/detail.css">
+<link rel="stylesheet" href="src/styles/screens/index.css">
+<link rel="stylesheet" href="src/styles/screens/launch.css">
+<link rel="stylesheet" href="src/styles/screens/running.css">
+<link rel="stylesheet" href="src/styles/screens/confirm.css">
+<link rel="stylesheet" href="src/styles/screens/power.css">
+<link rel="stylesheet" href="src/styles/screens/settings.css">
+<link rel="stylesheet" href="src/styles/screens/storage.css">
+<link rel="stylesheet" href="src/styles/screens/search.css">
+<link rel="stylesheet" href="src/styles/screens/downloads.css">
+<link rel="stylesheet" href="src/styles/screens/editor.css">
+<link rel="stylesheet" href="src/styles/screens/update.css">
+<link rel="stylesheet" href="src/styles/screens/bluetooth.css">
+</head>
+<body>
+
+<!-- Wrapper raiz: 1920×1080 absolutos. A adaptação à janela é feita por
+     transform: scale() em base.js/base.css — nunca por media query. -->
+<div id="app" class="app">
+
+  <header class="chrome chrome--header glass-chrome">
+    <div class="header__id">
+      <span class="header__wordmark">KYBER</span>
+      <span class="rule-v rule-v--26"></span>
+      <span class="header__screen" data-chrome="screenName">BIBLIOTECA</span>
+    </div>
+
+    <!-- Medidor de passo da primeira execução. Substitui a telemetria
+         quando o chrome está em modo de boot. -->
+    <div class="header__steps" data-chrome="steps">
+      <div class="header__step-bars" data-chrome="stepBars"></div>
+      <span class="header__step-label" data-chrome="stepLabel"></span>
+    </div>
+
+    <div class="header__telemetry">
+      <!-- Indicador de jogo vivo: SÓ o ponto é âmbar; o nome vai em text-mid.
+           Ausente quando não há jogo em execução. -->
+      <div class="header__live" data-chrome="live" hidden>
+        <span class="header__live-dot"></span>
+        <span class="header__live-name" data-chrome="liveName"></span>
+      </div>
+      <span class="rule-v rule-v--22" data-chrome="liveRule" hidden></span>
+
+      <span data-chrome="controllers">CONTROLE 1</span>
+      <span data-chrome="cpu">CPU 61 °C</span>
+      <span data-chrome="gpu">GPU 68 °C</span>
+      <span class="header__clock" data-chrome="clock">00:00</span>
+    </div>
+  </header>
+
+  <div class="chrome chrome--gauge" data-chrome="gauge">
+    <div class="gauge__label" data-chrome="gaugeLabel">ESTADO DA MÁQUINA</div>
+
+    <div class="gauge__track">
+      <div class="gauge__ticks"></div>
+      <div class="gauge__third gauge__third--1"></div>
+      <div class="gauge__third gauge__third--2"></div>
+      <div class="gauge__cursor" data-chrome="gaugeCursor"></div>
+    </div>
+
+    <div class="gauge__readout">
+      <div class="gauge__profile" data-chrome="profileName">AGRESSIVO</div>
+      <span class="rule-v rule-v--30"></span>
+      <div class="gauge__watts" data-chrome="watts">74 W</div>
+    </div>
+  </div>
+
+  <!-- As telas montam aqui. Altura fixa de 850px; sem régua, 928px. -->
+  <main id="screen" class="screen"></main>
+
+  <footer class="chrome chrome--footer glass-chrome">
+    <div class="footer__hints" data-chrome="hints">
+      <div class="hint"><span class="hint__glyph">A</span><span class="hint__label">SELECIONAR</span></div>
+      <div class="hint"><span class="hint__glyph">B</span><span class="hint__label">VOLTAR</span></div>
+    </div>
+    <div class="footer__context" data-chrome="context">KYBER · BUILD 2026.08-1</div>
+  </footer>
+
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,243 @@
+/* =====================================================================
+   KYBER — tela 01 · Biblioteca (vitrine)
+
+   Orçamento vertical. A faixa de conteúdo tem 850px e a soma abaixo é
+   exata; mexer num dos dois exige mexer no outro.
+
+     hero          317
+     prateleira    533
+                  ────
+                   850
+   ===================================================================== */
+
+.library {
+  --h-hero:  317px;
+  --h-shelf: 533px;
+
+  /* Capa retrato 2:3. Seis por fileira dentro dos 1824px úteis, com o
+     começo da sétima aparecendo — é o que diz que a lista continua.
+       6 × 244 + 5 × 48 = 1704   ·   sobra 120px de sétima capa */
+  --cover-w: 244px;
+  --cover-h: 366px;
+  --shelf-gap: 48px;
+
+  /* Folga em volta do card focado: o anel externo tem 7px, o card sobe
+     10px e cresce 2%. Sem esta folga o `overflow` da prateleira corta o
+     anel — que é justamente o único sinal de foco. */
+  --ring-room: 24px;
+
+  height: var(--h-content);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------------------------------------------------------------------
+   Hero — o título selecionado. Texto à esquerda sobre o void, arte à
+   direita atrás de um scrim que a devolve ao fundo.
+   --------------------------------------------------------------------- */
+.hero {
+  height: var(--h-hero);
+  flex: none;
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  border-bottom: 1px solid var(--chrome-line);
+}
+
+.hero__text {
+  position: relative;
+  z-index: 2;
+  padding: 38px var(--sp-screen) 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+  background: var(--void);
+}
+
+.hero__meta {
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: var(--track-label);
+  color: var(--text-low);
+  margin-bottom: 20px;
+}
+
+/* Um display por tela: este é o display da biblioteca. Uma linha só —
+   nome que não couber é cortado por decisão, nunca deixado quebrar a
+   soma de 1080. */
+.hero__title {
+  font: 700 var(--display-l)/0.92 var(--font-display);
+  letter-spacing: var(--track-display-l);
+  color: var(--text-hi);
+  margin-bottom: 22px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero__chips {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  padding: 9px 14px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .06em;
+  color: var(--text-mid);
+  white-space: nowrap;
+}
+
+.hero__sub {
+  font: 400 var(--body-m)/1.15 var(--font-text);
+  color: var(--text-mid);
+}
+
+.hero__panel {
+  position: relative;
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+}
+
+.hero__art,
+.hero__art > * {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.hero__art > img { object-fit: cover; }
+
+/* Único gradiente permitido: o scrim que devolve a arte ao fundo. */
+.hero__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--void) 0%, transparent 24%);
+}
+
+/* Marcas de canto — o desenho está em base.css; aqui só a posição. */
+.hero__panel .corner--tl { left: 36px; top: 30px; }
+.hero__panel .corner--br { right: 36px; bottom: 28px; }
+
+.hero__noart {
+  position: absolute;
+  right: 36px;
+  top: 30px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  letter-spacing: .2em;
+  color: var(--text-low);
+}
+
+/* ---------------------------------------------------------------------
+   Prateleira
+   --------------------------------------------------------------------- */
+.shelf-block {
+  height: var(--h-shelf);
+  flex: none;
+  padding: 26px var(--sp-screen) 0;
+  min-width: 0;
+}
+
+.shelf-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  font: 400 var(--label-m)/1 var(--font-data);
+  color: var(--text-low);
+}
+
+.shelf-head__count { letter-spacing: var(--track-label); }
+.shelf-head__sort  { letter-spacing: .14em; }
+
+/* A prateleira rola na horizontal e nunca mostra barra: a posição é dita
+   pelo foco, não por um controle de rolagem que ninguém pode acionar sem
+   ponteiro. O padding vertical é o que impede o `overflow` de cortar o
+   anel de foco; a margem negativa devolve o card à margem de 48px. */
+.shelf {
+  display: flex;
+  gap: var(--shelf-gap);
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* A folga interna existe para o anel de foco caber dentro da caixa de
+     rolagem — `overflow` corta o que passa dela, e o anel é o único sinal
+     de foco. À esquerda 12px, devolvidos pela margem negativa para o card
+     nascer na margem de 48px da tela. À direita 48px, que só entram em
+     cena no fim da lista: sem eles o último card encosta na borda e perde
+     o anel. A sétima capa continua sendo cortada em 1872, de propósito —
+     corte é o que diz que a lista continua. */
+  padding: var(--ring-room) var(--sp-screen) 14px 12px;
+  margin-left: -12px;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.shelf::-webkit-scrollbar { display: none; }
+
+.card {
+  flex: none;
+  width: var(--cover-w);
+  border-radius: var(--r-6);
+  padding-bottom: 16px;
+  /* A transição também vale na SAÍDA do foco — sem ela o irmão volta de
+     .70 para 1 com corte seco. */
+  transition: opacity var(--dur-focus) var(--ease),
+              transform var(--dur-focus) var(--ease);
+}
+
+.card__art {
+  width: var(--cover-w);
+  height: var(--cover-h);
+  border-radius: var(--r-6);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.card__name {
+  font: 500 var(--body-s)/1.25 var(--font-text);
+  color: var(--text-hi);
+  margin-top: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------------
+   Capa gerada — padrão monocromático derivado do título.
+   Cor só por variável; o SVG não carrega valor nenhum.
+   --------------------------------------------------------------------- */
+.cover {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cover--panel     .cover__ground { fill: var(--panel); }
+.cover--surface-1 .cover__ground { fill: var(--surface-1); }
+.cover--surface-2 .cover__ground { fill: var(--surface-2); }
+
+.cover__ink { fill: var(--text-hi); }
+
+.cover__ink-stroke {
+  fill: none;
+  stroke: var(--text-hi);
+  stroke-width: 2;
+}
+
+/* Inicial em display a 13%, número de catálogo em mono a 50% — os dois
+   valores estão na identidade visual, não são escolha de implementação. */
+.cover__initial {
+  font: 700 460px/1 var(--font-display);
+  letter-spacing: var(--track-display-l);
+  fill: var(--text-hi);
+  fill-opacity: .13;
+}
+
+.cover__catalog {
+  font: 400 48px/1 var(--font-data);
+  letter-spacing: 6.7px;
+  fill: var(--text-hi);
+  fill-opacity: .5;
+}

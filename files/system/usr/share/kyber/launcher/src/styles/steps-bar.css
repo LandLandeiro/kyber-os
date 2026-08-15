@@ -1,0 +1,51 @@
+/* =====================================================================
+   KYBER — barra de degraus (componente)
+   ===================================================================== */
+
+.steps-bar {
+  /* Ocupa a linha inteira: dentro de `.opt__row`, que é flex, sem isto a
+     barra encolhe até o conteúdo e os vinte degraus somem. */
+  flex: 1;
+  min-width: 0;
+  height: 88px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--panel);
+  transition: transform var(--dur-focus) var(--ease);
+}
+
+.steps-bar__track {
+  flex: 1;
+  min-width: 0;
+  height: 46px;
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+}
+
+/* Degrau apagado usa o traço da régua: é a mesma família de marcação de
+   escala, e mantém a barra legível sem gastar cor. */
+.steps-bar__step {
+  flex: 1;
+  min-width: 0;
+  background: var(--tick);
+  transition: background var(--dur-invert) linear;
+}
+
+.steps-bar__step[data-on="true"] { background: var(--text-hi); }
+
+.steps-bar__value {
+  flex: none;
+  min-width: 130px;
+  text-align: right;
+  font: 400 var(--data-l)/1 var(--font-data);
+  letter-spacing: var(--track-data-lg);
+  color: var(--text-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+.steps-bar__unit { font-size: 24px; color: var(--text-low); }

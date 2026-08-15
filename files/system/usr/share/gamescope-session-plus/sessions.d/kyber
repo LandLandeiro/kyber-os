@@ -1,0 +1,52 @@
+#! /bin/bash
+# Sessão KYBER.
+#
+# Este arquivo NÃO é executado: o gamescope-session-plus (ChimeraOS) faz source
+# dele dentro de `set -a`, sobe o gamescope, e roda $CLIENTCMD lá dentro. Nosso
+# trabalho aqui é só definir o ambiente e o comando do cliente.
+#
+# Não definimos SCREEN_WIDTH/SCREEN_HEIGHT de propósito: o gamescope usa a
+# resolução nativa do painel e o launcher se adapta sozinho por transform:
+# scale() sobre um palco de 1920×1080. Fixar a resolução aqui só criaria uma
+# segunda escala em cima da que já existe.
+
+KYBER_URL="http://127.0.0.1:8787/"
+
+# Fedora entrega o binário como chromium-browser e costuma criar o symlink
+# chromium. Resolver os dois evita uma sessão que morre por PATH.
+KYBER_BROWSER="$(command -v chromium || command -v chromium-browser)"
+
+short_session_recover() {
+    # A sessão morreu rápido demais — provavelmente o navegador não subiu.
+    # Cair no desktop é melhor que entrar em laço de boot: um console que não
+    # abre precisa deixar um caminho de conserto aberto.
+    if command -v steamos-session-select > /dev/null; then
+        steamos-session-select desktop
+    fi
+}
+
+post_gamescope_start() {
+    # Espera o kyber-launcher.service responder antes de abrir o navegador.
+    # Sem isto, a primeira tela do console pode ser um erro de conexão do
+    # Chromium — que é exatamente a impressão que não queremos causar no boot.
+    local tentativa
+    for tentativa in $(seq 1 50); do
+        curl -sf -o /dev/null "${KYBER_URL}" && return 0
+        sleep 0.1
+    done
+    echo "kyber: servidor local não respondeu em 5 s" >&2
+}
+
+# --kiosk já implica tela cheia e sem barra de navegação. O resto suprime o que
+# um console nunca deve mostrar: diálogo de erro, balão de "sessão anterior
+# encerrada", barra de tradução e navegação por gesto de overscroll.
+export CLIENTCMD="${KYBER_BROWSER} \
+--kiosk \
+--ozone-platform=wayland \
+--no-first-run \
+--noerrdialogs \
+--disable-session-crashed-bubble \
+--disable-features=TranslateUI \
+--overscroll-history-navigation=0 \
+--autoplay-policy=no-user-gesture-required \
+${KYBER_URL}"
