@@ -1,0 +1,72 @@
+[Unit]
+Description=KYBER API — escrita de perfil, sem privilégio
+Documentation=https://github.com/LandLandeiro/kyber-os
+After=local-fs.target
+
+# Nenhuma ordenação forte com o kyber-gameprofiled.service, pelo mesmo
+# motivo que o launcher não tem: se o socket ainda não existe, esta peça
+# responde 503 com o motivo e o launcher mostra a falha ao salvar. O
+# resto do console continua funcionando, porque a leitura é por arquivo e
+# não passa por aqui.
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -P -m kyberapi
+Environment=PYTHONPATH=/usr/lib/kyber
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=2
+
+# Usuário e grupo dedicados, do /usr/lib/sysusers.d/kyber-api.conf. O
+# grupo é o que o gameprofiled põe no socket: root:kyber-api 0660.
+# Conectar num socket Unix exige permissão de ESCRITA no arquivo, então
+# esta linha é literalmente quem pode falar com o daemon.
+User=kyber-api
+Group=kyber-api
+
+# ---------------------------------------------------------------------
+# Endurecimento.
+#
+# Este processo é o contrário do gameprofiled: ele recebe entrada de fora
+# e não precisa de poder nenhum. Então a lista aqui é para FECHAR, e não
+# tem concessão a registrar — a única coisa que ele faz além de falar
+# HTTP é abrir um socket Unix.
+#
+# CapabilityBoundingSet vazio: nada, nem CAP_NET_BIND_SERVICE, porque
+# 8788 está acima de 1024.
+#
+# IPAddressDeny/Allow é a defesa de verdade contra vazar para fora do
+# loopback. O --addr diz onde ligar; isto diz para o kernel que não há
+# outro lugar. Uma linha de argumento trocada por engano não vira console
+# escutando na rede.
+# ---------------------------------------------------------------------
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+# ProtectSystem=strict deixa /run somente-leitura, e isso NÃO impede
+# connect() num socket: o kernel só recusa escrita em arquivo comum,
+# diretório e link simbólico. É a mesma nota que está na unit do daemon,
+# e pelo mesmo motivo — foi verificada lá.
+
+[Install]
+WantedBy=multi-user.target

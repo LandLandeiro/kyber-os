@@ -64,5 +64,10 @@ modules:
         # desenha SEM LEITURA — o launcher não depende do daemon para
         # abrir, e é assim que tem que ser.
         - kyber-gameprofiled.service
+        # Traduz HTTP em comando de socket, sem privilégio. É a única
+        # peça que o launcher alcança para GRAVAR perfil; a leitura
+        # continua sendo arquivo servido pelo darkhttpd, e por isso o
+        # editor abre certo mesmo com esta unit fora do ar.
+        - kyber-api.service
 
   - type: signing # this sets up the proper policy & signing files for signed images to work fully

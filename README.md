@@ -42,6 +42,7 @@ browser inside it and no desktop behind it. Three pieces make that work:
 | Local static server for the launcher | `kyber-launcher.service` → `127.0.0.1:8787` |
 | The launcher itself | `/usr/share/kyber/launcher/` |
 | Machine state and performance profiles | `kyber-gameprofiled.service` → `/run/kyber/state.json` |
+| Profile writes, unprivileged | `kyber-api.service` → `127.0.0.1:8788` |
 
 The session plugs into `gamescope-session-plus`, the same mechanism Bazzite's
 own Steam session uses. That framework starts gamescope and runs our
@@ -128,7 +129,8 @@ install.
 
 **It exposes no HTTP.** Joining "takes input from outside" with "runs as root"
 is hard to undo later, so writes arrive over a Unix socket carrying a closed
-list of two verbs. The JSON files stay the read channel. See
+list of two verbs, and the thing that speaks HTTP is `kyber-api` — a separate,
+unprivileged process. The JSON files stay the read channel. See
 [Writing a profile](#writing-a-profile).
 
 ### How the launcher reaches it
@@ -154,7 +156,6 @@ in `/var/lib`, so there is no window in which the two versions disagree. Reading
 it over HTTP is safe against torn reads for the same reason `state.json` is —
 every write to it is `.tmp` + `rename(2)`, and it is written `0644` explicitly
 rather than inheriting whatever umask the writer had.
-
 
 `darkhttpd` follows it because it never resolves paths — no `lstat`, no
 `realpath`, no `O_NOFOLLOW`, it just `open()`s the target. That is also why its
@@ -474,7 +475,6 @@ nanosecond resolution, and it does not: ext4 with 128-byte inodes rounds to the
 second, which would make the second of two writes inside one second invisible
 until a third arrived.
 
-
 ### Game detection
 
 `/proc` is scanned for Steam's per-title cgroup, `steam_app_<appid>`. That beats
@@ -614,14 +614,11 @@ The profile editor has to actually apply, and the daemon runs as root. Those two
 facts are what the whole shape below exists to reconcile.
 
 ```
-something unprivileged  --Unix socket-->  gameprofiled (root)
-gameprofiled            --writes-->  /var/lib/kyber/profiles.json
-gameprofiled            --polls, next tick-->  applies
+launcher (Chromium)  --HTTP-->  kyber-api (unprivileged)
+kyber-api            --Unix socket-->  gameprofiled (root)
+gameprofiled         --writes-->  /var/lib/kyber/profiles.json
+gameprofiled         --polls, next tick-->  applies
 ```
-
-The "something unprivileged" is `kyber-api`, and it arrives in its own commit.
-This one stops at the socket, which is testable on its own with three lines of
-Python and no browser in the middle.
 
 The daemon gains no HTTP port. It gains a Unix socket carrying a **closed list
 of two verbs**, and the list being closed is the security property — not an
@@ -642,6 +639,13 @@ ever shrinks.
 **Two verbs, not one verb with a sentinel.** `set-profile` with `axes: {}` would
 do the same work. In a closed list the value is in each entry meaning exactly one
 thing; a parser with a special case is where a closed list starts to leak.
+
+The launcher reaches `clear-profile` without a button of its own: SAVE compares
+the edited profile against the resolved default and sends a delete when they
+match. Two actions arrive there meaning the same thing — RESTORE DEFAULT then
+SAVE, and opening a title that has no entry and saving without changing
+anything — and both should leave the file saying "follows the default" rather
+than pinning a snapshot of it.
 
 There is **no read verb**. That is also a property: a protocol that cannot read
 cannot leak, and "the JSON is the read channel" stays true. What is stored is
@@ -688,15 +692,18 @@ always published, now reaching the socket's reply.
 
 ### Validation is on the root side
 
-The daemon validates as if every message were hostile, and it keeps doing so no
-matter how the socket's permissions end up: whatever speaks HTTP on the other
-side takes input from a network port, and that is the piece that can be
-compromised.
+`kyber-api` deliberately does **not** know the vocabulary. If it validated,
+there would be two lists of valid values that diverge the day someone edits one
+— and, worse, someone would come to believe that process protects something.
 
-It is worth saying what the socket's mode does *not* buy. Once it is
-`0660 root:<group>`, the set of things that can open it is that group and root —
-*not* "anything in the session". The opposite belief, left standing for six
+It does not. With the socket at `0660 root:kyber-api`, the set of things that
+can open it is `{kyber-api, root}` — *not* "anything in the session". That is
+worth stating out loud, because the opposite belief, left standing for six
 months, becomes the argument for making the socket `0666`.
+
+The daemon validates as if every message were hostile anyway, for a different
+reason than it first appears: `kyber-api` takes input from a TCP port. It is the
+piece that can be compromised.
 
 - `appid` is an **integer**, 1 to 2³¹−1. Not a string, not a float, not a boolean
   (which is an `int` in Python and would slip through), and never a file path.
@@ -732,6 +739,59 @@ it was built to show.
 So: non-empty list and a value outside it → refused. Empty list → accepted, with
 a **warning** in the reply. The file stays a portable artifact, which is what
 lets the disk move to another machine and the axis start working there.
+
+### Who runs what
+
+`kyber-api` runs as a dedicated system user and group, declared in
+`/usr/lib/sysusers.d/kyber-api.conf` — processed by `systemd-sysusers` at boot,
+which is the right mechanism on an OSTree image where `/usr` is read-only.
+
+The daemon creates the socket and chowns it `root:kyber-api`, mode `0660`.
+Connecting to a Unix socket requires **write** permission on the file, so that
+line is literally the list of who can talk to the daemon.
+
+The default already fails closed: a socket created by root under umask 022 comes
+out `0755`, which is closed to everyone but root. The chown/chmod is a deliberate
+*loosening*, done only when there is a group to loosen in favour of. If the group
+is missing — someone removed the sysusers file, or it is the suite running on a
+Mac — the socket stays `0600` and the journal says only root will reach it. The
+opposite, dropping to `0666` because a config file was missing, is how a daemon
+becomes an open door.
+
+Rejected alternatives: **`nobody`**, because it is shared by design with every
+service that needs no privilege, and granting it write access to a socket that
+reconfigures the hardware hands that access to any future `nobody` service.
+**`DynamicUser=yes`**, which looks made for this and is not: the gid would be
+transient, and the daemon has to resolve the group at *its own* start, which
+happens before `kyber-api` exists.
+
+**The socket costs the daemon's unit nothing.** `RestrictAddressFamilies=AF_UNIX`
+already allowed it, `RuntimeDirectory=` already provides the directory,
+`CAP_CHOWN` is already in the bounding set for `RuntimeDirectory`, and
+`@system-service` already includes `@network-io`. There is no fourth hardening
+concession here.
+
+### Why `kyber-api` is on its own port
+
+`darkhttpd` serves static files and nothing else — no CGI, no proxy, by design.
+So either the writer lives on another port and pays for CORS, or it absorbs the
+static serving and CORS disappears.
+
+The second option costs the property the console has today: the interface opens
+with the daemon down and draws SEM LEITURA. Putting the writer inside the static
+server turns "saving fails" into a connection-error screen at boot. That is the
+same trade the `darkhttpd` unit refuses in its `--chroot` comment.
+
+So: its own port, explicit CORS, and the launcher still opens when this piece
+does not.
+
+**The CORS header here is not a defence**, and saying so is the point of writing
+it down. It stops a *page* from another origin reading the reply; it does nothing
+about a local process, which is the realistic threat on a machine whose browser
+is a kiosk on a fixed URL. What it does buy, narrowly: requiring
+`Content-Type: application/json` makes any cross-origin request a preflight, and
+the preflight fails on an `Access-Control-Allow-Origin` that is exact and never
+`*`.
 
 ### The socket must never freeze `at`
 
@@ -818,6 +878,13 @@ podman run --rm ghcr.io/landlandeiro/kyber:latest bash -c '
   ls /usr/share/kyber/profiles.default.json
   readlink /usr/share/kyber/launcher/state.json      # /run/kyber/state.json
   readlink /usr/share/kyber/launcher/profiles.json  # /var/lib/kyber/profiles.json
+
+  # The write path: an unprivileged API and the user that owns it. The
+  # sysusers file is what creates the group the daemon chowns the socket to;
+  # without it the socket stays 0600 and only root can write a profile.
+  ls /usr/lib/kyber/kyberapi/__main__.py
+  ls /usr/lib/systemd/system/kyber-api.service
+  ls /usr/lib/sysusers.d/kyber-api.conf
 
   # The frame limiter goes through the compositor, so this is what the
   # fpsLimit axis needs to exist before it can be anything but unsupported.
@@ -991,8 +1058,8 @@ journalctl --user -b | grep -i gamescope
 
 ### Writing a profile, layer by layer
 
-Each layer proves itself without the one above it. Work up from the bottom: the
-layer that answers tells you where the failure is.
+Three layers, and each one proves itself without the one above it. Work up from
+the bottom: the layer that answers tells you where the failure is.
 
 **Layer 1 — the stored profile is served.** No socket, no API, no launcher: this
 is a symlink and a static file.
@@ -1042,6 +1109,41 @@ cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
 
 `nc -U` works too if it is installed, but `python3` is guaranteed here — the
 daemon is written in it.
+
+**Layer 3 — HTTP.** Now the API, still with no browser.
+
+```bash
+systemctl status kyber-api.service
+journalctl -u kyber-api -b
+
+# The preflight. Both header values must come back exact.
+curl -s -i -X OPTIONS http://127.0.0.1:8788/profile/553850 \
+  -H 'Origin: http://127.0.0.1:8787' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: content-type' | grep -i 'HTTP/\|access-control'
+
+# Accepted → 200. Refused → 400 with the same body the socket returned.
+curl -s -w '\n%{http_code}\n' -X POST http://127.0.0.1:8788/profile/553850 \
+  -H 'Origin: http://127.0.0.1:8787' -H 'Content-Type: application/json' \
+  -d '{"axes":{"governor":"powersave"}}'
+
+# Daemon stopped → 503, not 500 and not silence. The launcher needs to tell
+# "it refused" from "it was not there"; they are different screens.
+sudo systemctl stop kyber-gameprofiled
+curl -s -w '\n%{http_code}\n' -X POST http://127.0.0.1:8788/profile/553850 \
+  -H 'Content-Type: application/json' -d '{"axes":{"governor":"powersave"}}'
+sudo systemctl start kyber-gameprofiled
+```
+
+If layer 3 fails and layer 2 passed, the problem is `kyber-api` — most likely
+its user is not in the socket's group, which shows up as `PermissionError` in
+`journalctl -u kyber-api`.
+
+Only then the screen: open a title, X for the profile editor, change an option
+and SALVAR. The toast says PERFIL SALVO; the axis rows on screen 17 change on
+the next tick. Asking for something the machine cannot do keeps you on the
+editor with PERFIL RECUSADO and the reason — it does not pop the screen, because
+the screen is where the choice gets fixed.
 
 The screen is the other half of the check, and it is faster: the header's CPU
 and GPU readings should move on their own, and stopping the daemon

@@ -55,6 +55,8 @@ command -v python3
 test -f /usr/lib/kyber/gameprofiled/__main__.py
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/lib/kyber \
     python3 -P -c 'import gameprofiled.__main__'
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/lib/kyber \
+    python3 -P -c 'import kyberapi.__main__'
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \
     /usr/share/kyber/profiles.default.json
 
