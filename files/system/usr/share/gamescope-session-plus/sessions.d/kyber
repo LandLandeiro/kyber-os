@@ -82,9 +82,16 @@ post_gamescope_start() {
 # --kiosk já implica tela cheia e sem barra de navegação. O resto suprime o que
 # um console nunca deve mostrar: diálogo de erro, balão de "sessão anterior
 # encerrada", barra de tradução e navegação por gesto de overscroll.
+#
+# x11, não wayland: o gamescope roda XWayland por dentro e exporta DISPLAY
+# (gamescope-session-plus:300). Pelo backend Wayland o Chromium ignorava o
+# --kiosk e abria janelado, com barra de endereço e aba — é o comportamento
+# descrito em ValveSoftware/gamescope#1356, onde fullscreen de janela dentro do
+# gamescope quebra nesse backend. Trocar o backend sozinho resolve; nenhuma
+# flag adicional de janela foi necessária.
 export CLIENTCMD="${KYBER_BROWSER} \
 --kiosk \
---ozone-platform=wayland \
+--ozone-platform=x11 \
 --no-first-run \
 --noerrdialogs \
 --disable-session-crashed-bubble \
