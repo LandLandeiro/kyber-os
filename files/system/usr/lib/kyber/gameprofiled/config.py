@@ -51,7 +51,7 @@ class Config:
         self.log = log or (lambda _: None)
         self.origin = "padrão embutido"
         self.dados = dict(EMBUTIDO)
-        self._mtime = None
+        self._marca = None
         self.reload()
 
     # ------------------------------------------------------------------
@@ -69,21 +69,33 @@ class Config:
     def reload(self):
         """Relê se o arquivo mudou. Devolve True quando releu.
 
-        Comparar mtime em vez de reabrir todo segundo: o arquivo muda uma
-        vez por edição e o daemon acorda 86400 vezes por dia."""
+        Comparar a marca do arquivo em vez de reabrir todo segundo: o
+        arquivo muda uma vez por edição e o daemon acorda 86400 vezes por
+        dia.
+
+        A marca é (mtime, tamanho, INODE), e o inode não é excesso de
+        zelo. Toda escrita disciplinada neste arquivo é `.tmp` +
+        `os.replace()`, que troca o inode — o `vi` com backup faz o mesmo.
+        Só o mtime bastaria se ele tivesse sempre resolução de
+        nanossegundo, e não tem: ext4 com inode de 128 bytes arredonda
+        para o segundo, e duas gravações dentro do mesmo segundo deixariam
+        a segunda invisível até que uma terceira aparecesse. O inode pega
+        a troca de arquivo mesmo quando o relógio não ajuda."""
         self._seed()
         try:
-            mtime = self.caminho.stat().st_mtime_ns
+            estado = self.caminho.stat()
         except OSError:
-            if self._mtime is not None:
+            if self._marca is not None:
                 self.log("config   arquivo sumiu; voltando ao padrão embutido")
-                self.dados, self.origin, self._mtime = dict(EMBUTIDO), "padrão embutido", None
+                self.dados, self.origin, self._marca = dict(EMBUTIDO), "padrão embutido", None
                 return True
             return False
 
-        if mtime == self._mtime:
+        marca = (estado.st_mtime_ns, estado.st_size, estado.st_ino)
+        if marca == self._marca:
             return False
-        self._mtime = mtime
+        relendo = self._marca is not None
+        self._marca = marca
 
         try:
             lido = json.loads(self.caminho.read_text())
@@ -99,6 +111,11 @@ class Config:
 
         self.dados = lido
         self.origin = self.fs.show(self.caminho)
+        # Uma linha por edição, e nenhuma no start — a primeira leitura já
+        # aparece no `origin` do state.json. É o que dá para ver, no
+        # journal, que o daemon percebeu a gravação do editor de perfil.
+        if relendo:
+            self.log(f"config   {self.origin} mudou; perfil relido")
         return True
 
     # ------------------------------------------------------------------

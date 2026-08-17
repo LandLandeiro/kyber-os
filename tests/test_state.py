@@ -246,6 +246,38 @@ class TestDaemonDevBox(DaemonBase):
         self.assertEqual(self.governor(), "powersave")
         self.assertIsNone(self.publicado()["runningGame"])
 
+    def test_perfil_editado_no_disco_chega_ao_state_json_no_tick_seguinte(self):
+        """O laço inteiro, que é o caminho que o editor de perfil usa.
+
+        Ele grava o arquivo; o daemon nota pelo tick seguinte, reaplica e
+        publica. Não há segundo caminho, e é isso que faz `vi` e a tela do
+        console valerem exatamente o mesmo."""
+        fakefs.sessao_steam(self.raiz)
+        alvo = self.raiz / "var/lib/kyber/profiles.json"
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+
+        def gravar(jogos):
+            temporario = alvo.parent / (alvo.name + ".tmp")
+            temporario.write_text(json.dumps({
+                "default": {"governor": "performance", "gpuLevel": "alto"},
+                "games": jogos,
+            }))
+            os.replace(temporario, alvo)
+
+        gravar({})
+        d = self.daemon()
+        d.tick()
+        self.assertEqual(self.governor(), "performance")
+
+        gravar({"553850": {"governor": "powersave"}})
+        self.relogio.avancar()
+        d.tick()
+
+        self.assertEqual(self.governor(), "powersave")
+        eixo = self.publicado()["profile"]["axes"]["governor"]
+        self.assertEqual((eixo["requested"], eixo["current"]),
+                         ("powersave", "powersave"))
+
     def test_at_avanca_a_cada_publicacao(self):
         # É o que o vigia do launcher compara para saber se a medição
         # parou. Carimbo repetido em daemon vivo seria falso positivo.

@@ -425,6 +425,41 @@ This is not tidiness. The launcher's close-game dialog promises, in as many
 words, that closing reverts the performance profile. Without the write-back that
 sentence is a lie and the console stays pinned on `performance` until reboot.
 
+#### Editing it while a game runs
+
+The file is polled once a second, and a change to the running title's profile
+lands on the next tick — no relaunch, no restart. That is the whole mechanism
+the profile editor will use: the editor writes the file, the daemon reacts to
+it. Editing with `vi` and saving from the console's own screen go through
+exactly the same path, and that is the point. A second path — something telling
+the daemon out of band — would let the file and the screen tell different
+stories on the day they disagreed.
+
+**The reapply does not capture again.** `capturado` holds what the machine had
+*before the game started*, and that is what goes back when the game exits.
+Capturing again on reapply would store what the daemon itself had just written:
+closing the game would restore `performance` instead of the `powersave` that was
+actually there, and the console would stay pinned hot until the next boot —
+precisely the failure the write-back exists to prevent.
+
+That one raises no error anywhere. It arrives months later as "my PC runs hot
+after I play", with nothing in the journal pointing at it. So the capture lives
+on one line of `_aplicar()` and the writing lives in `_escrever()`: the
+difference between the two transitions is that line, and it is visible instead
+of buried inside a method that does both.
+
+A change that does not reach the running title writes nothing. The file carries
+every title's profile, and editing one that is not running is no reason to
+rewrite the sysfs of one that is.
+
+The change is noticed by `(mtime, size, inode)`, not by mtime alone. Every
+disciplined write here is `.tmp` + `os.replace()`, which swaps the inode — `vi`
+with a backup does the same. mtime alone would suffice only if it always had
+nanosecond resolution, and it does not: ext4 with 128-byte inodes rounds to the
+second, which would make the second of two writes inside one second invisible
+until a third arrived.
+
+
 ### Game detection
 
 `/proc` is scanned for Steam's per-title cgroup, `steam_app_<appid>`. That beats
@@ -670,9 +705,11 @@ different:
 | `bare` | nothing. No hwmon, no card, no cpufreq |
 | `dual_gpu` | integrated and discrete together; the choice must land on the one with more VRAM |
 
-The two most valuable tests are the atomic write and the phase lock, because both
-guard against failures that raise no error: one hands the launcher truncated
-JSON, the other makes a healthy console report itself stalled.
+The three most valuable tests are the atomic write, the phase lock, and the one
+that proves a mid-game profile change does not re-capture — all three guard
+against failures that raise no error. The first hands the launcher truncated
+JSON, the second makes a healthy console report itself stalled, and the third
+leaves the machine pinned on `performance` after the game closes.
 
 You can also render a `state.json` from a fake tree without any hardware:
 

@@ -7,6 +7,7 @@ seguir em frente.
 """
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -263,6 +264,137 @@ class TestCicloDeVida(Base):
         self.assertEqual(score.score_of(corrente), 4)
 
 
+class TestPerfilMudaNoDisco(Base):
+    """A terceira transição: o arquivo de perfis muda com o jogo rodando.
+
+    É o caminho que o editor de perfil vai usar — ele grava o arquivo, e o
+    daemon reage a ele. Por isso a gravação destes testes é `.tmp` +
+    `os.replace()`, que é como o kyber-api vai gravar e como o `vi` com
+    backup grava: se o daemon só notasse reescrita no lugar, passaria aqui
+    e falharia no console.
+    """
+
+    def setUp(self):
+        super().setUp()
+        fakefs.sessao_steam(self.raiz)
+        self.ops = OpsFalso(self.raiz)
+        self.alvo = self.raiz / "var/lib/kyber/profiles.json"
+        self.alvo.parent.mkdir(parents=True, exist_ok=True)
+        self._gravar({"governor": "performance", "gpuLevel": "alto"})
+        self.config = config.Config(self.fs, log=self.log.append)
+        self.gerente = profile.ProfileManager(
+            self.fs, self.config, self.gpu, self.ops, self.log.append)
+
+    def _gravar(self, padrao, jogos=None):
+        temporario = self.alvo.parent / (self.alvo.name + ".tmp")
+        temporario.write_text(json.dumps({"default": padrao, "games": jogos or {}}))
+        os.replace(temporario, self.alvo)
+
+    def _jogo(self):
+        from gameprofiled import games
+        return games.find_running_game(self.fs, hz=fakefs.HZ)
+
+    @property
+    def _governor(self):
+        return self.fs.read(self.fs.glob(axes.CPUFREQ)[0] / "scaling_governor")
+
+    @property
+    def _dpm(self):
+        return self.fs.read(self.gpu.device / "power_dpm_force_performance_level")
+
+    # ------------------------------------------------------------------
+    def test_edicao_com_jogo_rodando_vale_sem_relancar(self):
+        jogo = self._jogo()
+        self.gerente.sync(jogo)
+        self.assertEqual(self._governor, "performance")
+
+        self._gravar({"governor": "performance", "gpuLevel": "alto"},
+                     jogos={"553850": {"governor": "powersave"}})
+        self.assertTrue(self.config.reload())
+        self.gerente.sync(jogo, config_mudou=True)
+
+        self.assertEqual(self._governor, "powersave")
+        self.assertEqual(self.gerente.estado["governor"].requested, "powersave")
+        self.assertTrue(any("reaplicando" in linha for linha in self.log))
+
+    def test_reaplicar_nao_recaptura_e_a_saida_devolve_o_que_havia_antes(self):
+        """O teste que mais importa deste grupo.
+
+        Recapturar na reaplicação guardaria o que o PRÓPRIO daemon acabou
+        de escrever, e fechar o jogo devolveria a máquina para
+        performance/alto em vez do powersave/auto que estava lá. Não
+        levanta erro nenhum: chega como "meu PC fica quente depois de
+        jogar", meses depois."""
+        self.assertEqual((self._governor, self._dpm), ("powersave", "auto"))
+
+        jogo = self._jogo()
+        self.gerente.sync(jogo)
+        self.assertEqual((self._governor, self._dpm), ("performance", "high"))
+
+        self._gravar({"governor": "performance", "gpuLevel": "alto"},
+                     jogos={"553850": {"gpuLevel": "baixo"}})
+        self.assertTrue(self.config.reload())
+        self.gerente.sync(jogo, config_mudou=True)
+        self.assertEqual(self._dpm, "low")
+
+        # A captura continua sendo a da ENTRADA do jogo, não a do momento
+        # da reaplicação.
+        self.assertEqual(self.gerente.capturado["governor"], "powersave")
+        self.assertEqual(self.gerente.capturado["gpuLevel"], "auto")
+
+        self.gerente.sync(None)
+        self.assertEqual((self._governor, self._dpm), ("powersave", "auto"))
+
+    def test_edicao_de_outro_titulo_nao_escreve_em_sysfs(self):
+        jogo = self._jogo()
+        self.gerente.sync(jogo)
+
+        escritas = []
+        original = self.fs.write
+        self.fs.write = lambda c, v: (escritas.append(str(c)), original(c, v))[1]
+
+        self._gravar({"governor": "performance", "gpuLevel": "alto"},
+                     jogos={"730": {"governor": "powersave"}})
+        self.assertTrue(self.config.reload())
+        self.gerente.sync(jogo, config_mudou=True)
+
+        # O arquivo mudou, o perfil DESTE título não. Sem a comparação, um
+        # arquivo reescrito em laço viraria escrita em sysfs em laço.
+        self.assertEqual([c for c in escritas if "/sys/" in c], [])
+
+    def test_sem_jogo_a_edicao_nao_aplica_nada(self):
+        self.gerente.sync(None)
+        antes = (self._governor, self._dpm)
+
+        self._gravar({"governor": "performance", "gpuLevel": "alto"},
+                     jogos={"553850": {"governor": "powersave"}})
+        self.assertTrue(self.config.reload())
+        self.gerente.sync(None, config_mudou=True)
+
+        # Em repouso o daemon observa e não aplica; editar o arquivo não
+        # muda isso. A edição vale no próximo lançamento.
+        self.assertEqual((self._governor, self._dpm), antes)
+        self.assertEqual(self.gerente.estado["governor"].state, "observed")
+
+    def test_no_apply_acompanha_a_edicao_sem_escrever(self):
+        gerente = profile.ProfileManager(
+            self.fs, self.config, self.gpu, self.ops, self.log.append,
+            apply_enabled=False)
+        jogo = self._jogo()
+        gerente.sync(jogo)
+        self.assertEqual(gerente.estado["gpuLevel"].requested, "alto")
+        self.assertEqual(self._dpm, "auto")
+
+        self._gravar({"governor": "performance", "gpuLevel": "baixo"})
+        self.assertTrue(self.config.reload())
+        gerente.sync(jogo, config_mudou=True)
+
+        # O modo existe para mostrar o que ACONTECERIA. Publicar o pedido
+        # velho depois de alguém editar o arquivo seria mentir sobre isso.
+        self.assertEqual(gerente.estado["gpuLevel"].requested, "baixo")
+        self.assertEqual(self._dpm, "auto")
+
+
 class TestConfig(Base):
     def test_semeia_do_usr_share(self):
         semente = self.raiz / "usr/share/kyber/profiles.default.json"
@@ -303,12 +435,32 @@ class TestConfig(Base):
         self.assertEqual(cfg.profile_for(1)["governor"], "performance")
         self.assertTrue(any("turbo_maximo" in linha for linha in self.log))
 
+    def test_troca_de_arquivo_e_notada_mesmo_com_carimbo_igual(self):
+        # Os dois conteúdos têm o MESMO tamanho e o teste força o mesmo
+        # mtime, então só o inode separa um do outro. É o caso real de um
+        # filesystem de carimbo grosso — ext4 com inode de 128 bytes
+        # arredonda para o segundo — recebendo duas gravações seguidas.
+        alvo = self.raiz / "var/lib/kyber/profiles.json"
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        alvo.write_text(json.dumps({"default": {"governor": "powersave"}}))
+        cfg = config.Config(self.fs, log=self.log.append)
+        antes = alvo.stat()
+
+        temporario = alvo.parent / "profiles.json.tmp"
+        temporario.write_text(json.dumps({"default": {"governor": "schedutil"}}))
+        os.replace(temporario, alvo)
+        os.utime(alvo, ns=(antes.st_atime_ns, antes.st_mtime_ns))
+        self.assertEqual(alvo.stat().st_size, antes.st_size)
+        self.assertEqual(alvo.stat().st_mtime_ns, antes.st_mtime_ns)
+
+        self.assertTrue(cfg.reload())
+        self.assertEqual(cfg.profile_for(1)["governor"], "schedutil")
+
     def test_rele_so_quando_o_arquivo_muda(self):
         alvo = self.raiz / "var/lib/kyber/profiles.json"
         alvo.parent.mkdir(parents=True, exist_ok=True)
         alvo.write_text(json.dumps({"default": {"governor": "powersave"}}))
         cfg = config.Config(self.fs, log=self.log.append)
         self.assertFalse(cfg.reload())
-        import os
         os.utime(alvo, ns=(0, 0))
         self.assertTrue(cfg.reload())

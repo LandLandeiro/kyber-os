@@ -313,11 +313,16 @@ class Daemon:
     # ------------------------------------------------------------------
     def tick(self):
         agora = self.relogio()
-        self.config.reload()
+        # O retorno do reload é o gatilho da terceira transição do perfil:
+        # o arquivo mudou desde a leitura anterior. Descartá-lo — que era o
+        # que se fazia — significava que editar o perfil com o jogo aberto
+        # só valia no lançamento seguinte, e que o editor do launcher
+        # anunciaria PERFIL SALVO para uma máquina que não mudou nada.
+        config_mudou = self.config.reload()
         self.buscar_sessao()
 
         jogo = games.find_running_game(self.fs, self.log)
-        self.manager.sync(jogo)
+        self.manager.sync(jogo, config_mudou=config_mudou)
 
         leituras = self.ler_sensores()
         soma = self.soma_medida(leituras)
