@@ -139,3 +139,60 @@ def dual_gpu(raiz):
     _hwmon(raiz, 2, "amdgpu", {"temp1_input": 68000, "temp1_label": "edge"},
            sob=discreta)
     return raiz
+
+
+# ----------------------------------------------------------------------
+# /proc.
+#
+# Os conteúdos abaixo são o formato real: cgroup v2 numa linha `0::`,
+# environ e cmdline separados por NUL, e o stat com o nome do executável
+# entre parênteses no campo 2.
+# ----------------------------------------------------------------------
+BTIME = 1786900000
+HZ = 100
+
+
+def proc(raiz, btime=BTIME):
+    _escrever(Path(raiz) / "proc/stat",
+              f"cpu  1 2 3 4\nbtime {btime}\nprocesses 9182")
+    return raiz
+
+
+def processo(raiz, pid, comm="game", starttime=0, cgroup=None,
+             environ=None, cmdline=None):
+    base = Path(raiz) / "proc" / str(pid)
+    # Campos 1 e 2, depois o 3 em diante. O campo 22 (starttime) é o 20º
+    # depois do fecha-parênteses.
+    resto = " ".join(["S"] + ["0"] * 18 + [str(starttime)] + ["0"] * 30)
+    _escrever(base / "stat", f"{pid} ({comm}) {resto}")
+    if cgroup is not None:
+        _escrever(base / "cgroup", cgroup)
+    if environ is not None:
+        (base).mkdir(parents=True, exist_ok=True)
+        (base / "environ").write_bytes(b"\0".join(environ) + b"\0")
+    if cmdline is not None:
+        (base).mkdir(parents=True, exist_ok=True)
+        (base / "cmdline").write_bytes(b"\0".join(cmdline) + b"\0")
+    return base
+
+
+SCOPE = "0::/user.slice/user-1000.slice/user@1000.service/app.slice"
+
+
+def sessao_steam(raiz, appid=553850, inicio_s=120):
+    """A árvore que a Steam monta de fato: reaper, wrapper e binário no
+    mesmo cgroup steam_app_<appid>."""
+    proc(raiz)
+    grupo = f"{SCOPE}/steam_app_{appid}"
+    processo(raiz, 900, comm="steam", starttime=10 * HZ,
+             cgroup=f"{SCOPE}/app-steam.scope")
+    processo(raiz, 1200, comm="reaper", starttime=inicio_s * HZ, cgroup=grupo,
+             cmdline=[b"reaper", b"SteamLaunch", f"AppId={appid}".encode(), b"--"])
+    processo(raiz, 1201, comm="pv-bwrap", starttime=(inicio_s + 1) * HZ, cgroup=grupo)
+    processo(raiz, 1202, comm="helldivers2.ex", starttime=(inicio_s + 4) * HZ,
+             cgroup=grupo,
+             environ=[b"HOME=/var/home/kyber", f"SteamAppId={appid}".encode()])
+    # O launcher. Nao esta em cgroup de jogo e nao pode ser confundido com um.
+    processo(raiz, 1400, comm="chromium", starttime=8 * HZ,
+             cgroup=f"{SCOPE}/app-kyber.scope")
+    return raiz

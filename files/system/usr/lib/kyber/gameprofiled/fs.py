@@ -21,6 +21,15 @@ class Fs:
     def path(self, rel):
         return self.root / str(rel).lstrip("/")
 
+    def _em(self, p):
+        """Aceita str e Path e trata os dois como o mesmo caminho.
+
+        `str` é caminho do sistema ('proc/stat') e passa pela raiz; `Path`
+        já saiu de um glob e vem resolvido. Sem esta conversão um método
+        que recebesse string leria do diretório de trabalho — nos testes
+        isso não é erro visível, é um None silencioso."""
+        return p if isinstance(p, Path) else self.path(p)
+
     def show(self, p):
         """O caminho como o sistema o vê, sem a raiz de teste na frente."""
         try:
@@ -32,7 +41,7 @@ class Fs:
         return sorted(self.root.glob(str(pattern).lstrip("/")))
 
     def exists(self, p):
-        return Path(p).exists()
+        return self._em(p).exists()
 
     # ------------------------------------------------------------------
     # Leitura.
@@ -45,13 +54,13 @@ class Fs:
     # ------------------------------------------------------------------
     def read(self, p):
         try:
-            return Path(p).read_text(errors="replace").strip()
+            return self._em(p).read_text(errors="replace").strip()
         except OSError:
             return None
 
     def read_bytes(self, p):
         try:
-            return Path(p).read_bytes()
+            return self._em(p).read_bytes()
         except OSError:
             return None
 
@@ -71,7 +80,7 @@ class Fs:
         é permissão, EINVAL é valor recusado pelo driver, ENODEV é o nó
         que sumiu. A mensagem vai para o log e para a nota do eixo."""
         try:
-            with open(p, "w") as arquivo:
+            with open(self._em(p), "w") as arquivo:
                 arquivo.write(str(valor))
             return None
         except OSError as erro:
