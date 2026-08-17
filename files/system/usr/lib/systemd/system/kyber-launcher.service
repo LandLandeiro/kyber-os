@@ -9,6 +9,17 @@ Before=display-manager.service
 
 [Service]
 Type=simple
+# Do NOT add --chroot here. From the Etapa 5 work on, this tree carries an
+# absolute symlink out to /run/kyber/, where gameprofiled publishes the live
+# machine state the launcher polls. darkhttpd follows that symlink only because
+# it never resolves paths: it has no lstat, no realpath and no O_NOFOLLOW, and
+# opens targets with a plain open(). Its make_safe_url() sanitises the URL
+# string and nothing else, so containment is not a promise it makes.
+#
+# Under --chroot the target sits outside the jail and the request turns into a
+# 404. Nothing crashes and no log line stands out — the launcher simply keeps
+# painting the last telemetry it managed to read, which reads as a stale
+# console rather than a broken one.
 ExecStart=/usr/bin/darkhttpd /usr/share/kyber/launcher \
     --addr 127.0.0.1 --port 8787 \
     --index index.html --no-listing
