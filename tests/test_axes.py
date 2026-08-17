@@ -386,6 +386,28 @@ class TestPerfilMudaNoDisco(Base):
         self.assertEqual((self._governor, self._dpm), antes)
         self.assertEqual(self.gerente.estado["governor"].state, "observed")
 
+    def test_o_log_da_restauracao_nao_afirma_o_que_nao_houve(self):
+        """Achado do hardware: `restaurado para None (agora None)`.
+
+        `None` não é valor de restauração — é a ausência de captura — e o
+        `(agora None)` tinha forma de releitura conferida sem releitura
+        nenhuma. Nesta máquina o eixo de quadros nem canal tem."""
+        jogo = self._jogo()
+        self.gerente.sync(jogo)
+        self.log.clear()
+        self.gerente.sync(None)
+
+        quadros = [l for l in self.log if l.startswith("perfil   fpsLimit")]
+        self.assertEqual(len(quadros), 1)
+        self.assertNotIn("None", quadros[0])
+        self.assertIn("nada capturado", quadros[0])
+
+        # O governor tem captura de verdade, e a linha dele continua
+        # dizendo o valor E que a releitura confere.
+        governor = [l for l in self.log if l.startswith("perfil   governor")][0]
+        self.assertIn("restaurado para 'powersave'", governor)
+        self.assertIn("releitura confere", governor)
+
     def test_no_apply_acompanha_a_edicao_sem_escrever(self):
         gerente = profile.ProfileManager(
             self.fs, self.config, self.gpu, self.ops, self.log.append,

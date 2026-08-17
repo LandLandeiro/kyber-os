@@ -255,11 +255,40 @@ class ProfileManager:
         for chave in self.RESTAURAVEIS:
             salvo = self.capturado.get(chave)
             resultado = self.axes[chave].restore(salvo)
-            self.log(f"perfil   {chave:<9} restaurado para {salvo!r} "
-                     f"(agora {resultado.current!r})")
+            self.log(f"perfil   {chave:<9} {self._frase_restauro(salvo, resultado)}")
         self.capturado = {}
         self.pedido = {}
         self.estado = {c: e._observed() for c, e in self.axes.items()}
+
+    @staticmethod
+    def _frase_restauro(salvo, resultado):
+        """O que a linha do journal pode honestamente afirmar.
+
+        A versão anterior imprimia sempre `restaurado para X (agora Y)`, e
+        com o limite de quadros isso saía como `restaurado para None
+        (agora None)` — que afirma duas coisas falsas de uma vez. `None`
+        não é valor de restauração: é a AUSÊNCIA de captura. E o `(agora
+        None)` tem forma de releitura conferida quando não houve releitura
+        nenhuma, porque o eixo não tem getter.
+
+        É a mesma classe de erro que a sondagem do convar cometeu ao ler
+        um canal só: afirmar sem prova. A nota do eixo já dizia que sem
+        getter a restauração é por SUPOSIÇÃO; a linha de log passa a dizer
+        o mesmo em vez de contradizê-la.
+
+        O caso `salvo is None` também alcança o governor e o DPM: quando
+        não houve o que capturar, os dois não escrevem nada. `restaurado
+        para None` dizia que tinham escrito."""
+        if salvo is None:
+            base = "nada capturado"
+            return f"{base} — {resultado.note}" if resultado.note else \
+                f"{base}; nada foi escrito"
+        if resultado.current is None:
+            return f"devolvido a {salvo!r}, sem releitura para confirmar"
+        if resultado.current != salvo:
+            return (f"devolvido a {salvo!r}, releitura devolveu "
+                    f"{resultado.current!r}")
+        return f"restaurado para {salvo!r}, releitura confere"
 
     def shutdown(self):
         """Encerrar o daemon com jogo rodando também tem que devolver a
