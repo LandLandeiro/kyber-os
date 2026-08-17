@@ -14,10 +14,15 @@ Builds are published to `ghcr.io/landlandeiro/kyber` and signed with
 
 ## Status
 
-Early, but it boots into something. The image currently ships the KYBER
-launcher and the session that runs it. The game-profile daemon
-(`gameprofiled`) is not in the image yet, so the launcher runs against its
-mock data adapter — the interface is real, the numbers behind it are not.
+Early, but it boots into something. The image ships the KYBER launcher, the
+session that runs it, and `gameprofiled`, which measures the machine and
+applies performance profiles.
+
+The two halves are not joined yet. The daemon publishes real numbers to
+`/run/kyber/state.json`; the launcher still reads its mock data adapter,
+because the adapter that reads `state.json` is the next piece of kyber-shell
+work. Until then the file is real and nothing on screen comes from it —
+`curl http://127.0.0.1:8787/state.json` is how you see it.
 
 ## The session
 
@@ -30,6 +35,7 @@ browser inside it and no desktop behind it. Three pieces make that work:
 | Session definition — sets `CLIENTCMD`, waits for the server | `/usr/share/gamescope-session-plus/sessions.d/kyber` |
 | Local static server for the launcher | `kyber-launcher.service` → `127.0.0.1:8787` |
 | The launcher itself | `/usr/share/kyber/launcher/` |
+| Machine state and performance profiles | `kyber-gameprofiled.service` → `/run/kyber/state.json` |
 
 The session plugs into `gamescope-session-plus`, the same mechanism Bazzite's
 own Steam session uses. That framework starts gamescope and runs our
@@ -106,6 +112,300 @@ bluebuild build ./recipes/recipe.yml
 Both `.kyber-shell/` and the staged launcher are gitignored, so a local build
 leaves nothing to accidentally commit.
 
+## The state daemon
+
+`gameprofiled` is the other half of the console: it measures the machine, applies
+the performance profile of whatever is running, and publishes both to
+`/run/kyber/state.json` once a second. It is stdlib-only Python living in
+`/usr/lib/kyber/gameprofiled/`, with no package of its own and no dependency to
+install.
+
+**It exposes no HTTP and accepts no commands.** Joining "takes input from
+outside" with "runs as root" is hard to undo later, so the daemon only writes.
+When the profile editor needs to save, the planned path is a Unix socket with a
+closed command list plus an unprivileged `kyber-api`; the JSON stays the read
+channel either way.
+
+### How the launcher reaches it
+
+The daemon writes to `/run/kyber/`, which the launcher cannot see: the launcher
+speaks HTTP and only sees the tree `darkhttpd` serves. An absolute symlink joins
+them, created at build time by `files/scripts/kyber-gameprofiled.sh`:
+
+```
+/usr/share/kyber/launcher/state.json -> /run/kyber/state.json
+```
+
+`darkhttpd` follows it because it never resolves paths — no `lstat`, no
+`realpath`, no `O_NOFOLLOW`, it just `open()`s the target. That is also why its
+unit must never gain `--chroot`; the comment there says so at length.
+
+Two traps come with polling a file, and both are handled in `state.py`:
+
+**Torn reads.** `darkhttpd` stats and `sendfile`s with no lock, so reading during
+a write returns truncated JSON. Every publish goes to `state.json.tmp` on the
+same tmpfs and lands with `os.replace()`. Only `state.json` is symlinked, so the
+half-written file is never reachable over HTTP at all.
+
+**Conditional requests.** `darkhttpd` compares `If-Modified-Since` as a string,
+at one-second granularity. Two writes inside one second make the client get a
+304, serve the cached body, see a repeated `at`, and declare the telemetry
+stalled on a perfectly healthy console. The daemon publishes at most once a
+second **with its phase anchored at X.5s**, so consecutive writes can never share
+a whole second. Asking for a shorter `--interval` raises it back to 1.0 and logs
+why.
+
+### state.json
+
+```jsonc
+{
+  "schema": 1,
+  "at": 1786969941000,        // epoch ms the daemon MEASURED, not when you read
+  "intervalMs": 1000,
+
+  "cpuTemp": 61,              // °C, or null
+  "gpuTemp": 68,
+  "cpuWatts": 38.4,           // W, CPU package only
+  "gpuWatts": 96.8,           // W, GPU only
+
+  "watts": 50,                // ALWAYS from the curve. See below.
+  "intensity": 0.5,           // 0..1, position on the gauge
+  "fps": null,                // never measured; see the axes table
+
+  "wattsIdle": 22,
+  "wattsPerPoint": 7,
+
+  "runningGame": { "appid": 553850, "startedAt": 1786900120000 },
+
+  "profile": {
+    "origin": "/var/lib/kyber/profiles.json",
+    "applies": "553850",       // or "idle"
+    "axes": {
+      "governor": {
+        "requested": "performance",
+        "current": "performance",
+        "state": "applied",
+        "available": ["powersave", "performance"]
+      }
+      // ... gpuLevel, fpsLimit, priority
+    }
+  },
+
+  "sources": {                 // one entry per measurable field, never omitted
+    "cpuTemp": { "kind": "measured", "driver": "coretemp",
+                 "path": "/sys/class/hwmon/hwmon7/temp1_input",
+                 "label": "Package id 0" },
+    "watts":   { "kind": "estimated", "note": "..." },
+    "fps":     { "kind": "absent", "note": "..." }
+  },
+
+  "daemon": { "version": "0.1.0", "startedAt": 1786969940000 }
+}
+```
+
+`at` is the producer's timestamp, and it is the only field that separates "the
+daemon just measured and nothing changed" from "the daemon stopped measuring" —
+every other field looks identical in both cases. kyber-shell's telemetry watcher
+counts repeated `at` values and calls it a stalled reading after three.
+
+Every entry in `sources` has a `kind`, including the absent ones:
+
+| `kind` | Means |
+| --- | --- |
+| `measured` | a sensor reading of the thing the field claims to be |
+| `estimated` | computed from a model, not read from anything |
+| `absent` | no source, with a `note` saying where we looked |
+
+Absence is published as `null` with a reason, never as zero. Zero is a value, and
+a value is the claim that somebody measured.
+
+### Sensor discovery
+
+Nothing is hardcoded. `hwmonN` is driver bind order, not identity — the same
+sensor changes number between boots — and the two machines this project targets
+do not even share drivers. The test box is an i5-13400F (`coretemp`, no iGPU)
+with an RX 7600 (discrete `amdgpu`); the console is a Ryzen 5 5700G (`k10temp`)
+with integrated Vega 8. A fixed path would work on one and silently measure the
+wrong thing on the other.
+
+| Field | Searched, in order | Chosen by |
+| --- | --- | --- |
+| `cpuTemp` | `/sys/class/hwmon/*/name` ∈ `k10temp`, `zenpower`, `coretemp`; then `/sys/class/thermal/*/type` | label `Tdie` → `Tctl` → `Package id 0` → `Tccd1` → lowest input |
+| `gpuTemp` | `/sys/class/drm/card*/device/hwmon/*` with `DRIVER=amdgpu` | label `edge` → `junction` → first |
+| `gpuWatts` | same hwmon | `power1_average` → `power1_input` |
+| `cpuWatts` | `/sys/class/powercap/intel-rapl:*` named `package-*` | `energy_uj`, differentiated over time |
+| governor | `/sys/devices/system/cpu/cpufreq/policy*` | written per policy, read back |
+| gpuLevel | `<card>/device/power_dpm_force_performance_level` | written, read back |
+
+`Tdie` beats `Tctl` because `Tctl` carries an offset on some AMD families.
+`Package id 0` beats the core sensors because the header shows the package, not
+the hottest core. The GPU is found through the card rather than the flat hwmon
+list because with two `amdgpu` cards the name is ambiguous; with more than one,
+the largest VRAM wins and every candidate is logged.
+
+RAPL is an energy counter, not a power reading, so the first read returns
+nothing — there is no prior interval to divide by — and counter wraparound is
+handled. The node is called `intel-rapl` on both vendors: since 5.11 the
+`intel_rapl_msr` driver also binds AMD's energy MSRs from family 17h up.
+
+The whole search is printed to the journal at startup, hits and misses alike:
+
+```
+sensor cpuTemp   /sys/class/hwmon/hwmon7/temp1_input (coretemp, Package id 0)
+sensor gpuTemp   /sys/class/drm/card1/device/hwmon/hwmon2/temp1_input (amdgpu, edge)
+eixo   governor  driver intel_pstate; disponíveis: powersave, performance
+eixo   fpsLimit  NÃO APLICÁVEL nesta máquina
+```
+
+A sensor that stops answering after having answered triggers rediscovery, which
+is what survives a driver rebind without rescanning sysfs every second.
+
+### What it applies, and what it does not
+
+The four axes do not have equal footing, and `state.json` says which is which
+instead of treating them alike.
+
+| Axis | Mechanism | Verifiable? |
+| --- | --- | --- |
+| `governor` | writes `scaling_governor` on every policy | **yes** — written, read back, compared |
+| `gpuLevel` | writes `power_dpm_force_performance_level` | the *setting* yes; the *effect* on clocks only indirectly |
+| `priority` | `nice` + `ionice` across the game's process tree | yes, by re-reading `/proc/PID/stat` |
+| `fpsLimit` | **nothing** | there is no kernel file for it |
+
+Each axis publishes one of six states, and each maps to a different thing the
+launcher should draw:
+
+`applied` · `degraded` (written, read back different) · `failed` · `unavailable`
+(the axis works but a precondition is missing right now) · `unsupported` (this
+build has nowhere to write; it will never work here) · `observed` (nothing was
+requested; the value is just what the machine has).
+
+**`fpsLimit` is not implemented and is not faked.** Frame limiting belongs to the
+compositor, and the daemon has no channel to it. The three paths that exist all
+go through gamescope and none go through here:
+
+1. `--framerate-limit` on the gamescope command line — the launcher controls the
+   launch, so this is the cheapest one;
+2. the limiter file gamescope watches at runtime, which is how SteamOS changes
+   the cap without a relaunch (needs verifying against the gamescope version
+   Bazzite ships);
+3. `MANGOHUD_CONFIG=fps_limit=N` in the launch environment.
+
+**`priority: tempo real` is deliberately not offered.** `SCHED_FIFO` on a game
+process can wedge the console, and there is no cgroup-level protection in this
+version. It is left out of `available` rather than quietly reinterpreted as
+`alta` — a label that promises one thing while the machine does another is worse
+than a missing option.
+
+### The profile comes from disk
+
+Since the daemon takes no commands, the profile it applies comes from
+`/var/lib/kyber/profiles.json`, seeded on first run from
+`/usr/share/kyber/profiles.default.json`. That file is the seam the future
+`kyber-api` will write to; the format is already what it will save.
+
+**With no game running the daemon applies nothing** — it observes and reports.
+Two practical reasons: not fighting Bazzite's own power management on a console
+that idles most of the time, and not forcing a low DPM level underneath the
+launcher, which is a 60 fps UI on the same hardware.
+
+When a game appears, the daemon captures the current value of each axis before
+writing. When it exits, it writes them back — including values outside the
+console's vocabulary, because the machine might have been on `ondemand` and
+returning it to `powersave` would leave it different from how we found it.
+Stopping the daemon with a game running restores too.
+
+This is not tidiness. The launcher's close-game dialog promises, in as many
+words, that closing reverts the performance profile. Without the write-back that
+sentence is a lie and the console stays pinned on `performance` until reboot.
+
+### Game detection
+
+`/proc` is scanned for Steam's per-title cgroup, `steam_app_<appid>`. That beats
+parsing command lines on three counts: `/proc/PID/cgroup` is world-readable
+where `environ` would need `CAP_SYS_PTRACE`, the cgroup catches the whole tree
+rather than just the `reaper`, and the PID list it yields is exactly what the
+priority axis needs to renice.
+
+Underneath it is `reaper` → Proton wrappers → the game binary, with a varying
+number of rungs between (pressure-vessel, wine, the title's own launcher). No
+attempt is made to guess which one "is the game": they all belong to the session
+and all go on the list. `startedAt` comes from the *oldest* process in the group,
+since the launch began with the reaper and the binary comes up seconds later.
+
+Two fallbacks cover older Steam or a title running outside the scope it creates:
+`SteamAppId` in `environ`, which survives any depth of the tree, and
+`SteamLaunch AppId=` in `cmdline`, which identifies the reaper.
+
+The game's *name* is deliberately not resolved here. It would mean parsing
+`libraryfolders.vdf` and `appmanifest_*.acf` under `/home`, and `state.json` is
+world-readable because `nobody` has to serve it. The launcher already has that
+library data and can look up the name by appid.
+
+### The power curve is a guess, and says so
+
+`watts` is **never a measurement**, not even with a calibrated curve. It always
+comes out of `wattsIdle + score × wattsPerPoint`.
+
+Neither target machine can measure what the console draws. RAPL covers the CPU
+package, `power1_average` covers the GPU, and their sum still ignores the
+motherboard, the memory and the power supply's losses. Publishing that sum as
+`watts` would give a number the shape of a measurement without the substance.
+
+So the components are published as themselves, and `sources.watts.note` carries
+the comparison:
+
+```
+"curva NÃO calibrada (22 W de repouso + 7 W por ponto, chute do protótipo);
+ estimado 50 W contra 135.2 W somando os componentes medidos, que não cobrem
+ placa-mãe, memória nem perda da fonte"
+```
+
+The same line goes to the journal every ten minutes. It exists so that nobody
+watching this gauge every day gets used to a number nobody checked.
+
+To calibrate: put a wall meter on the console, read it at idle and again with the
+profile at its highest reachable score, then set `wattsIdle` to the first,
+`wattsPerPoint` to `(second − first) / score`, and flip `calibrated` to `true`.
+Note the divisor is the score you can actually reach, not 8 — see the next
+section.
+
+### What this pushes back to kyber-shell
+
+Four things this work surfaced that the launcher has to answer. They are written
+down here because they are the kind of finding that evaporates.
+
+**1. `schedutil` is a dead control today.** With `intel_pstate` in active mode —
+the default on the test machine — `scaling_available_governors` offers only
+`performance` and `powersave`. The profile editor currently offers three
+governors, and on that machine one of them does nothing. That is an orphan
+promise, the class of thing the project forbids. The daemon now publishes
+`available` per axis so the launcher can grey out what does not exist, but
+*reading* it is unbuilt launcher work that was not in any plan. Same for
+`fpsLimit`, which is `unsupported` everywhere, and `priority: tempo real`, which
+is never offered.
+
+**2. The gauge can never reach AGRESSIVO on real hardware.** The score model
+gives `fpsLimit` up to 2 points and `priority` up to 2, but `fpsLimit` is never
+applied and `tempo real` is never offered. The best reachable score is
+2 + 2 + 0 + 1 = **5 of 8** → `nominal`, at 57 W. `hot` needs 6. The top third of
+the ruler — the signature element of the whole interface — is unreachable by
+construction. Someone has to decide whether the scale is normalised against what
+the machine can actually do, or whether the unreachable third is honest.
+
+**3. Two sources of truth for the score model.** It lives in
+`gameprofiled/score.py` and in kyber-shell's `src/data/mock.js`: two
+repositories, two languages, one product decision about how four selectors
+become a position on a ruler. `tests/test_score.py` pins the nine watt values and
+the level thresholds, so a change here breaks the build — but a change *there*
+breaks nothing. The mitigation is one-directional. The real fix is one model in
+one place.
+
+**4. The adapter has to send `cache: "no-store"`.** The phase-locked publishing
+makes a false 304 impossible from the writer's side, but the reader can remove
+the conditional request entirely, and should. Belt and braces on a failure that
+otherwise shows up as a healthy console reporting stalled telemetry.
+
 ## Installation
 
 > [!WARNING]
@@ -181,6 +481,48 @@ podman run --rm ghcr.io/landlandeiro/kyber:latest bash -c '
   . /usr/share/gamescope-session-plus/sessions.d/kyber && echo "$CLIENTCMD"'
 ```
 
+### Without any hardware: the gameprofiled unit tests
+
+The daemon is stdlib-only Python and every filesystem access goes through an
+injectable root, so the whole discovery and profile layer runs on a laptop —
+macOS included. There is no build step and nothing to install:
+
+```bash
+python3 -m unittest discover -s tests -t .
+```
+
+The tests run against three fake sysfs trees, each there to prove something
+different:
+
+| Tree | Proves |
+| --- | --- |
+| `intel_rx7600` | the dev box, with **hwmon indices deliberately shuffled** — `coretemp` at `hwmon7`, the SSD at `hwmon0`. Discovery that sorts by index measures the SSD and never notices |
+| `ryzen_5700g` | the console: `k10temp` with no `Tdie`, and an integrated GPU that exposes **no temperature at all** |
+| `bare` | nothing. No hwmon, no card, no cpufreq |
+| `dual_gpu` | integrated and discrete together; the choice must land on the one with more VRAM |
+
+The two most valuable tests are the atomic write and the phase lock, because both
+guard against failures that raise no error: one hands the launcher truncated
+JSON, the other makes a healthy console report itself stalled.
+
+You can also render a `state.json` from a fake tree without any hardware:
+
+```bash
+mkdir -p /tmp/kyber-fake
+PYTHONPATH=files/system/usr/lib/kyber:. python3 -c '
+from tests import fakefs
+fakefs.intel_rx7600("/tmp/kyber-fake"); fakefs.sessao_steam("/tmp/kyber-fake")'
+PYTHONPATH=files/system/usr/lib/kyber python3 -P -m gameprofiled \
+    --root /tmp/kyber-fake --once
+cat /tmp/kyber-fake/run/kyber/state.json
+```
+
+`--root` swaps the filesystem and only the filesystem. `setpriority` and
+`ioprio_set` talk to the real kernel by PID, and a fake tree's PIDs are numbers
+that exist on the machine you are inspecting — so a simulated root refuses to
+touch processes at all, and the priority axis reports `failed` with that as its
+reason. Everything else in the output is real.
+
 ### Without any hardware: the launcher in a normal browser
 
 The launcher is plain HTML/CSS/JS, so any machine can run it. Serve it from a
@@ -208,6 +550,23 @@ with CORS errors in the console, which is exactly why the server exists.
 systemctl status kyber-launcher.service
 curl -I http://127.0.0.1:8787/
 
+# The state daemon, and what it found on this machine. The discovery lines
+# are printed once at startup and are the first thing to read when the
+# header shows a dash instead of a number.
+systemctl status kyber-gameprofiled.service
+journalctl -u kyber-gameprofiled -b | grep -E 'sensor|eixo|watts'
+
+# The file itself, through the same path the launcher uses. If this 404s,
+# the symlink or the daemon is missing — and that is exactly what the
+# launcher will draw as SEM LEITURA.
+curl -s http://127.0.0.1:8787/state.json | python3 -m json.tool
+
+# It has to change every second. Two identical `at` values from a running
+# daemon means the publish loop is stuck; three in a row is what the
+# launcher calls a stalled reading.
+for i in 1 2 3; do curl -s http://127.0.0.1:8787/state.json \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["at"])'; sleep 1; done
+
 # The session entry the display manager reads
 ls /usr/share/wayland-sessions/
 
@@ -225,6 +584,17 @@ merge landed the way you expect:
 ```bash
 ls /etc/sddm.conf.d/            # zzz-kyber-* must sort last
 grep -r . /etc/sddm.conf.d/     # Session=kyber.desktop, User=<you>
+```
+
+**On a machine you have not run this on before**, look before it writes. The
+daemon takes `--no-apply`, which detects the game and publishes everything while
+touching no sysfs at all:
+
+```bash
+sudo systemctl stop kyber-gameprofiled
+sudo PYTHONPATH=/usr/lib/kyber python3 -P -m gameprofiled --no-apply --once \
+    --state /tmp/state.json
+python3 -m json.tool /tmp/state.json
 ```
 
 To boot into the desktop instead, mask the file:
@@ -279,8 +649,12 @@ published here.
 | `files/system/usr/share/gamescope-session-plus/sessions.d/kyber` | The KYBER session definition |
 | `files/system/usr/share/wayland-sessions/kyber.desktop` | Session entry for the display manager |
 | `files/system/usr/lib/systemd/system/` | Custom systemd units |
+| `files/system/usr/lib/kyber/gameprofiled/` | The state daemon — stdlib-only Python, no package |
+| `files/system/usr/share/kyber/profiles.default.json` | Factory profiles and power curve, seeded into `/var/lib/kyber/` on first run |
+| `tests/` | Unit tests for the daemon against fake sysfs trees. Not shipped in the image |
 | `files/system/etc/sddm.conf.d/` | Autologin override that makes KYBER the default session |
 | `files/scripts/` | Scripts available to the `script` module during build |
+| `files/scripts/kyber-gameprofiled.sh` | Verifies the daemon imports and creates the `state.json` symlink |
 | `modules/` | Custom BlueBuild modules specific to KYBER |
 | `.github/workflows/build.yml` | The build and publish pipeline, and the pinned launcher version |
 | `cosign.pub` | Public key used to verify the published image |

@@ -21,6 +21,26 @@ from .fs import Fs
 from .profile import ProfileManager
 from .state import Publisher, Reading
 
+
+class SimulatedOps:
+    """O que substitui as chamadas de processo quando a raiz é simulada.
+
+    `--root` troca o filesystem, e só ele. `setpriority` e `ioprio_set`
+    falam com o kernel de verdade por PID, e os PIDs de uma árvore falsa
+    são números que EXISTEM na máquina de quem está inspecionando — rodar
+    a demonstração do README renicaria três processos aleatórios do host.
+
+    Então raiz simulada não toca em processo nenhum, e o eixo de
+    prioridade reporta a recusa em vez de fingir que aplicou."""
+
+    MOTIVO = "raiz simulada (--root); nenhum processo real foi tocado"
+
+    def setpriority(self, pid, nice):
+        return self.MOTIVO
+
+    def set_ioprio(self, pid, classe, nivel):
+        return self.MOTIVO
+
 # Depois de tantas leituras vazias seguidas de um sensor que ANTES
 # respondia, o caminho provavelmente morreu — driver recarregado, GPU
 # suspensa, dispositivo rebindado. Redescobrir é barato; varrer o sysfs a
@@ -96,9 +116,14 @@ class Daemon:
         self.ultima_comparacao = None
 
         self.discover()
+        simulando = str(opcoes.root) != "/"
+        if simulando:
+            self.log("daemon   raiz simulada em " + str(opcoes.root)
+                     + " — nenhum processo real será tocado")
         self.manager = ProfileManager(
-            self.fs, self.config, self.gpu, log=self.log,
-            apply_enabled=not opcoes.no_apply)
+            self.fs, self.config, self.gpu,
+            ops=SimulatedOps() if simulando else None,
+            log=self.log, apply_enabled=not opcoes.no_apply)
         self._log_eixos()
 
     # ------------------------------------------------------------------
@@ -234,6 +259,12 @@ class Daemon:
 
     def shutdown(self):
         self.manager.shutdown()
+
+        # --once existe para se OLHAR o resultado; apagar o arquivo logo
+        # depois de escrevê-lo deixaria o comando sem saída nenhuma.
+        if self.opcoes.once:
+            return
+
         # O systemd apaga /run/kyber ao parar a unit, mas uma parada suja
         # deixaria o arquivo para trás e o launcher leria LEITURA PARADA de
         # um daemon que não existe mais. SEM LEITURA é o estado correto.
