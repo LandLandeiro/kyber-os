@@ -18,11 +18,17 @@ Early, but it boots into something. The image ships the KYBER launcher, the
 session that runs it, and `gameprofiled`, which measures the machine and
 applies performance profiles.
 
-The two halves are not joined yet. The daemon publishes real numbers to
-`/run/kyber/state.json`; the launcher still reads its mock data adapter,
-because the adapter that reads `state.json` is the next piece of kyber-shell
-work. Until then the file is real and nothing on screen comes from it —
-`curl http://127.0.0.1:8787/state.json` is how you see it.
+The two halves are joined. The daemon publishes to `/run/kyber/state.json` and
+kyber-shell's `SystemAdapter` (v0.6.0) reads it over the same loopback server
+that serves the launcher, so the temperatures, the watts and the running game on
+screen come from this machine. The Steam side — library, cover art, downloads —
+is still the mock until Etapa 7; the two arrive separately because `useAdapter`
+composes partial implementations.
+
+What the launcher does with a daemon that is not there is not an afterthought:
+no `state.json` means SEM LEITURA, and a `state.json` whose `at` stops advancing
+means LEITURA PARADA. Both are drawn, and the second is the one worth having —
+stale telemetry that looks current makes a broken console look healthy.
 
 ## The session
 
@@ -75,7 +81,7 @@ The version is pinned in one place — `KYBER_SHELL_REF` in
 
 1. Tag the state you want in kyber-shell:
    ```bash
-   git -C ../kyber-shell tag -a v0.5.0 -m "Etapa 5" && git -C ../kyber-shell push origin v0.5.0
+   git -C ../kyber-shell tag -a v0.6.0 -m "SystemAdapter" && git -C ../kyber-shell push origin v0.6.0
    ```
 2. Change `KYBER_SHELL_REF` to that tag and push.
 
@@ -370,41 +376,61 @@ profile at its highest reachable score, then set `wattsIdle` to the first,
 Note the divisor is the score you can actually reach, not 8 — see the next
 section.
 
-### What this pushes back to kyber-shell
+### What this pushed back to kyber-shell
 
-Four things this work surfaced that the launcher has to answer. They are written
-down here because they are the kind of finding that evaporates.
+Four things this work surfaced that the launcher had to answer. Two are
+answered, in kyber-shell v0.6.0. Two are still open, and the reason each is
+still open is worth as much as the finding.
 
-**1. `schedutil` is a dead control today.** With `intel_pstate` in active mode —
-the default on the test machine — `scaling_available_governors` offers only
-`performance` and `powersave`. The profile editor currently offers three
-governors, and on that machine one of them does nothing. That is an orphan
-promise, the class of thing the project forbids. The daemon now publishes
-`available` per axis so the launcher can grey out what does not exist, but
-*reading* it is unbuilt launcher work that was not in any plan. Same for
-`fpsLimit`, which is `unsupported` everywhere, and `priority: tempo real`, which
-is never offered.
+**1. `schedutil` was a dead control. ANSWERED.** With `intel_pstate` in active
+mode — the default on the test machine — `scaling_available_governors` offers
+only `performance` and `powersave`. The profile editor offered three governors,
+and on that machine one of them did nothing. Same for `fpsLimit`, `unsupported`
+everywhere, and `priority: tempo real`, never offered: five dead controls on one
+screen.
 
-**2. The gauge can never reach AGRESSIVO on real hardware.** The score model
-gives `fpsLimit` up to 2 points and `priority` up to 2, but `fpsLimit` is never
-applied and `tempo real` is never offered. The best reachable score is
+This is why `available` is in the format. The editor now reads it and strikes
+what the machine cannot do, achromatically — struck label, recessed surface, and
+no `tabindex`, so the D-pad cannot reach it. It disables rather than removes: the
+option row is a flex, and dropping an item would change the screen's shape
+between machines, and `schedutil` existing but being unavailable is worth
+teaching.
+
+**2. The gauge still cannot reach AGRESSIVO. OPEN, DELIBERATELY.** The score
+model gives `fpsLimit` up to 2 points and `priority` up to 2, but `fpsLimit` is
+never applied and `tempo real` is never offered. The best reachable score is
 2 + 2 + 0 + 1 = **5 of 8** → `nominal`, at 57 W. `hot` needs 6. The top third of
 the ruler — the signature element of the whole interface — is unreachable by
-construction. Someone has to decide whether the scale is normalised against what
-the machine can actually do, or whether the unreachable third is honest.
+construction.
 
-**3. Two sources of truth for the score model.** It lives in
-`gameprofiled/score.py` and in kyber-shell's `src/data/mock.js`: two
-repositories, two languages, one product decision about how four selectors
+It stays that way on purpose. Normalising the scale against what the machine can
+do today would be optimising against a temporary limitation: `fpsLimit` has three
+named paths to being implemented, all through gamescope, and the day one lands
+the scale would have to move back. A rescaled ruler is also a ruler whose numbers
+mean something different on every machine. The unreachable third is the honest
+reading until frame limiting works or is abandoned.
+
+**3. Two sources of truth for the score model. OPEN, AND IT ALREADY BIT.** The
+model lives in `gameprofiled/score.py` and in kyber-shell's `src/data/mock.js`:
+two repositories, two languages, one product decision about how four selectors
 become a position on a ruler. `tests/test_score.py` pins the nine watt values and
 the level thresholds, so a change here breaks the build — but a change *there*
-breaks nothing. The mitigation is one-directional. The real fix is one model in
-one place.
+breaks nothing.
 
-**4. The adapter has to send `cache: "no-store"`.** The phase-locked publishing
-makes a false 304 impossible from the writer's side, but the reader can remove
-the conditional request entirely, and should. Belt and braces on a failure that
-otherwise shows up as a healthy console reporting stalled telemetry.
+The one-directional mitigation is exactly as weak as it sounded. The daemon
+publishes `current: null` for `fpsLimit` on every machine and for `priority` at
+rest; `score.py` treats an unknown axis as weight 0, and the launcher's copy did
+not — it used `indexOf` without handling `-1`, so `FPS_WEIGHT[-1]` was
+`undefined` and the score became `NaN`. The gauge painted **AGRESSIVO at
+`NaN W`**: an invented value wearing the appearance of a measurement, in the most
+alarming third of the ruler. Fixed in v0.6.0, on the launcher side, by hand,
+after it shipped. The real fix is still one model in one place.
+
+**4. The adapter had to send `cache: "no-store"`. ANSWERED.** Phase-locked
+publishing makes a false 304 impossible from the writer's side; `no-store`
+removes the conditional request from the reader's side, so there is no 304 to
+serve a cached body behind. Both ends now, on a failure that otherwise shows up
+as a healthy console reporting stalled telemetry.
 
 ## Installation
 
@@ -470,8 +496,20 @@ podman run --rm ghcr.io/landlandeiro/kyber:latest bash -c '
   ls /usr/lib/systemd/system/kyber-launcher.service
   command -v chromium chromium-browser darkhttpd
   ls /usr/share/kyber/launcher/src/assets/fonts/*.woff2 | wc -l   # expect 10
+
+  # The daemon and the one link that joins it to the launcher. The link is
+  # dangling in the image on purpose — /run is only populated at runtime —
+  # so check the target string, not the target.
+  ls /usr/lib/kyber/gameprofiled/__main__.py
+  ls /usr/lib/systemd/system/kyber-gameprofiled.service
+  ls /usr/share/kyber/profiles.default.json
+  readlink /usr/share/kyber/launcher/state.json   # /run/kyber/state.json
 '
 ```
+
+The symlink is the whole joint. Lose it and nothing goes red: the daemon keeps
+publishing, the launcher keeps asking, the request 404s, and the console draws
+SEM LEITURA forever with no log line pointing at the cause.
 
 Also worth checking that the session file produces the command you expect,
 since a bad `CLIENTCMD` fails at boot with nothing useful on screen:
@@ -525,14 +563,33 @@ reason. Everything else in the output is real.
 
 ### Without any hardware: the launcher in a normal browser
 
-The launcher is plain HTML/CSS/JS, so any machine can run it. Serve it from a
-kyber-shell checkout the same way the console does, and open
-`http://127.0.0.1:8787`:
+The launcher is plain HTML/CSS/JS, so any machine can run it. Since v0.6.0 it
+also reads `state.json`, so a plain static server is no longer the whole test —
+kyber-shell carries a harness that plays both halves, the loopback server and
+the daemon:
 
 ```bash
 git clone https://github.com/LandLandeiro/kyber-shell && cd kyber-shell
-python3 -m http.server 8787 --bind 127.0.0.1
+./scripts/servir.py              # http://127.0.0.1:8787, fixture dev-box
+./scripts/servir.py --lista      # the five fixtures
 ```
+
+It republishes `state.json` once a second with the `at` advancing, atomically and
+phase-locked at X.5s, the same as `gameprofiled`. A static JSON would not test
+anything: the timestamp never changes, and the launcher correctly calls that a
+stalled reading within ten seconds. With it running, `p` freezes the telemetry
+(→ LEITURA PARADA), `d` takes the daemon down (→ SEM LEITURA), `l` brings it
+back.
+
+Four of the five fixtures came out of `gameprofiled` itself, run against this
+repository's fake sysfs trees, so they match what the daemon publishes rather
+than someone's memory of the format. `sem-governor` is the test machine as it
+really is — `intel_pstate` active, no `schedutil` — and it is the one that shows
+the struck-out options in the profile editor.
+
+`?mock` on the URL puts the launcher back on simulated telemetry, for interface
+work with no state server alongside. Without it and without a `state.json`, the
+launcher shows SEM LEITURA, which is what a console with a dead daemon shows.
 
 Check out the ref pinned in `KYBER_SHELL_REF` if you want the version a
 published image actually shipped, rather than the tip of the branch.
@@ -574,6 +631,14 @@ ls /usr/share/wayland-sessions/
 # so this is verbose on purpose
 journalctl --user -b | grep -i gamescope
 ```
+
+The screen is the other half of the check, and it is faster: the header's CPU
+and GPU readings should move on their own, and stopping the daemon
+(`systemctl stop kyber-gameprofiled`) should turn them into dashes and put SEM
+LEITURA on the gauge within a second. If the numbers sit still instead, the
+daemon is publishing but the launcher is not reading — check that
+`/usr/share/kyber/launcher/state.json` is still a symlink, since that is the
+only thing joining the two.
 
 KYBER is the session that starts automatically — the image ships
 `/etc/sddm.conf.d/zzz-kyber-autologin.conf`, which sorts after the file Bazzite
