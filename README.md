@@ -151,15 +151,21 @@ ls /usr/share/wayland-sessions/
 journalctl --user -b | grep -i gamescope
 ```
 
-To make KYBER the session that starts automatically, add a file that sorts
-after the one Bazzite rewrites on every boot:
+KYBER is the session that starts automatically — the image ships
+`/etc/sddm.conf.d/zzz-kyber-autologin.conf`, which sorts after the file Bazzite
+rewrites on every boot and so wins. It sets only `Session`; the username still
+comes from Bazzite's file, which resolves it at boot time. To check that the
+merge landed the way you expect:
 
 ```bash
-sudo tee /etc/sddm.conf.d/zzz-kyber-autologin.conf <<'EOF'
-[Autologin]
-Session=kyber.desktop
-User=<your-user>
-EOF
+ls /etc/sddm.conf.d/            # zzz-kyber-* must sort last
+grep -r . /etc/sddm.conf.d/     # Session=kyber.desktop, User=<you>
+```
+
+To boot into the desktop instead, mask the file:
+
+```bash
+sudo ln -sf /dev/null /etc/sddm.conf.d/zzz-kyber-autologin.conf
 ```
 
 If the session fails to start, it falls back to the desktop rather than looping
@@ -209,6 +215,7 @@ published here.
 | `files/system/usr/share/gamescope-session-plus/sessions.d/kyber` | The KYBER session definition |
 | `files/system/usr/share/wayland-sessions/kyber.desktop` | Session entry for the display manager |
 | `files/system/usr/lib/systemd/system/` | Custom systemd units |
+| `files/system/etc/sddm.conf.d/` | Autologin override that makes KYBER the default session |
 | `files/scripts/` | Scripts available to the `script` module during build |
 | `modules/` | Custom BlueBuild modules specific to KYBER |
 | `.github/workflows/build.yml` | The build and publish pipeline |
