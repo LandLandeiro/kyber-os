@@ -38,6 +38,7 @@ sem sudo, sem PAM, sem shell. `extra_groups=[]` porque sem isso o filho
 guarda os grupos suplementares do root depois de trocar de uid.
 """
 
+import errno
 import re
 import subprocess
 from dataclasses import dataclass
@@ -153,6 +154,18 @@ def find_session(fs, log=None):
     return None
 
 
+# Duas coisas na unit fazem a queda de privilégio falhar, e as duas
+# chegam aqui como o mesmo EPERM sem contexto. Custaram uma ida ao
+# hardware para serem achadas; a pista fica escrita para não custarem uma
+# segunda.
+DICA_EPERM = (
+    "setuid/setgid para o uid da sessão foi recusado — a unit precisa de "
+    "CAP_SETUID e CAP_SETGID no CapabilityBoundingSet (o kernel exige as "
+    "duas mesmo DESCENDO de privilégio), e de ProtectHome diferente de "
+    "`yes`, que esvazia /run/user junto com /home"
+)
+
+
 class SubprocessRunner:
     """A única chamada que sai do processo. Isolada para o teste gravá-la
     em vez de executá-la — nada disto roda num Mac."""
@@ -167,7 +180,19 @@ class SubprocessRunner:
         except subprocess.TimeoutExpired:
             return None, "", f"tempo esgotado em {timeout}s"
         except OSError as erro:
-            return None, "", f"{type(erro).__name__}: {erro.strerror or erro}"
+            return None, "", descrever(erro)
+
+
+def descrever(erro):
+    """A mensagem do erro, com a pista quando ela se aplica.
+
+    EPERM aqui quase nunca é o gamescopectl recusando: é o filho morrendo
+    entre o fork e o exec, antes de o binário existir no processo. A
+    mensagem crua diz `Operation not permitted` e não diz de onde veio."""
+    base = f"{type(erro).__name__}: {erro.strerror or erro}"
+    if getattr(erro, "errno", None) == errno.EPERM:
+        return f"{base} — {DICA_EPERM}"
+    return base
 
 
 class Compositor:

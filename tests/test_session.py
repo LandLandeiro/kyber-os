@@ -256,3 +256,23 @@ class TestEixo(Base):
         eixo.apply("30")
         eixo.restore(None)
         self.assertEqual(self.escritas(), ["30", "0"])
+
+
+class TestDicaDeEperm(unittest.TestCase):
+    """A queda de privilégio falha por duas razões distintas na unit, e as
+    duas chegam como o mesmo EPERM sem contexto. Custaram uma ida ao
+    hardware; a pista existe para não custarem uma segunda."""
+
+    def test_eperm_ganha_a_pista_das_capabilities(self):
+        erro = PermissionError(1, "Operation not permitted")
+        texto = session.descrever(erro)
+        self.assertIn("Operation not permitted", texto)
+        self.assertIn("CAP_SETUID", texto)
+        self.assertIn("CAP_SETGID", texto)
+        self.assertIn("ProtectHome", texto)
+
+    def test_outros_erros_nao_ganham_pista_errada(self):
+        erro = FileNotFoundError(2, "No such file or directory")
+        texto = session.descrever(erro)
+        self.assertNotIn("CAP_SETUID", texto)
+        self.assertIn("No such file", texto)

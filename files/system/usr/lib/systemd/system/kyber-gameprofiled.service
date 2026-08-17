@@ -32,17 +32,87 @@ StateDirectory=kyber
 StateDirectoryMode=0755
 
 # ---------------------------------------------------------------------
-# Endurecimento.
+# Endurecimento, e o registro do que foi aberto.
 #
 # O daemon roda como root porque escreve em /sys: não há como aplicar
 # governor de CPU sem isso. Então o resto do orçamento de confinamento
-# importa mais, não menos.
+# importa mais, não menos — e cada afrouxamento fica escrito aqui com o
+# motivo, porque uma lista de capabilities sem justificativa vira, em seis
+# meses, uma lista que ninguém ousa encurtar.
 #
-# ProtectKernelTunables NÃO pode ser ligado, e é o ponto: ele monta /sys
-# somente-leitura, que é exatamente o que este daemon precisa escrever.
-# Declarar a proteção e depois não conseguir aplicar perfil nenhum seria
-# pior que não declarar — uma unit que parece endurecida e um eixo que
-# falha em silêncio.
+# TRÊS CONCESSÕES, em ordem de quando foram feitas.
+#
+# 1. ProtectKernelTunables DESLIGADO (Etapa 5). Ele monta /sys
+#    somente-leitura, que é exatamente o que este daemon precisa
+#    escrever. Declarar a proteção e depois não conseguir aplicar eixo
+#    nenhum seria pior que não declarar: uma unit com cara de endurecida
+#    e um perfil que falha em silêncio. O ReadWritePaths abaixo devolve o
+#    mínimo — dois nós, ambos escritos com releitura conferida.
+#
+# 2. CAP_SYS_PTRACE (Etapa 5). Ler /proc/PID/environ de processo de outro
+#    usuário exige. É o FALLBACK da detecção de jogo; o detector
+#    primário, pelo cgroup, não precisa dela. Também é o que faz a
+#    descoberta da sessão gráfica funcionar, que lê o environ pelo mesmo
+#    caminho.
+#
+# 3. CAP_SETUID + CAP_SETGID e ProtectHome afrouxado (Etapa 5, limite de
+#    quadros). O eixo de fps fala com o gamescope pelo socket Wayland da
+#    sessão do usuário, e o daemon droga privilégio antes de chamar o
+#    gamescopectl. Duas coisas o impediam, e as duas são silenciosas:
+#
+#      setuid(1000) exige CAP_SETUID mesmo DESCENDO de privilégio — o
+#      kernel não olha a direção, olha se o uid alvo é um dos que o
+#      processo já tem. setgroups([]) e setgid() exigem CAP_SETGID pela
+#      mesma razão. Sem elas o filho morre com EPERM antes do exec, e a
+#      mensagem que chega é um "Operation not permitted" que não diz de
+#      onde veio.
+#
+#      ProtectHome=yes torna /home, /root E /run/user INACESSÍVEIS. O
+#      socket do gamescope mora em /run/user/<uid>/, então mesmo com as
+#      capabilities o filho não o enxergaria. Nada no log denunciaria
+#      isso: a descoberta da sessão lê o caminho do environ de um
+#      processo, nunca do diretório, então ela reporta sucesso enquanto o
+#      diretório está vazio para nós.
+#
+#    O QUE ESTAS DUAS CAPABILITIES CUSTAM DE VERDADE. Pouco, e é honesto
+#    dizer por quê: o processo já é uid 0 com CAP_DAC_OVERRIDE. Quem pode
+#    escrever qualquer arquivo do sistema já podia virar qualquer usuário
+#    pelo caminho longo. O que elas mudam é a conveniência de um daemon
+#    comprometido, não o teto do que ele alcança. A alavanca de verdade
+#    seria não rodar como root — e é a escrita em sysfs que a segura.
+#
+#    ALTERNATIVA CONSIDERADA: não dropar privilégio e falar com o
+#    compositor como root. Some com CAP_SETUID e CAP_SETGID e NÃO some
+#    com o ProtectHome, porque o socket continua em /run/user. Custa um
+#    cliente Wayland rodando como root dentro do runtime dir de outra
+#    pessoa, com o risco de deixar arquivo de root ali. Trocar duas
+#    capabilities por uma inversão de privilégio permanente é troca ruim.
+#
+# O QUE FOI VERIFICADO E NÃO ERA O PROBLEMA:
+#
+#   NoNewPrivileges  não bloqueia setuid(). Ele impede GANHAR privilégio
+#                    num execve — bit setuid, capability de arquivo,
+#                    transição de rótulo. Fica, e agora vale mais: depois
+#                    da queda para uid 1000 o filho não tem como subir.
+#   PrivateTmp       só troca /tmp e /var/tmp. Não encosta em /run.
+#   PrivateNetwork   inofensivo, e por um motivo que não é óbvio: socket
+#                    Unix de FILESYSTEM não vive em namespace de rede.
+#                    Se o gamescope usasse socket de namespace abstrato,
+#                    esta linha o cortaria. Ele usa
+#                    /run/user/<uid>/gamescope-0, que é arquivo.
+#   ProtectSystem    deixa /run somente-leitura fora do RuntimeDirectory,
+#     =strict        e connect() num socket NÃO é bloqueado por montagem
+#                    read-only: o kernel só recusa escrita em arquivo
+#                    comum, diretório e link simbólico.
+#   SystemCallFilter @system-service já inclui o grupo @setuid.
+#   RestrictRealtime bloqueia SCHED_FIFO — e é bom que bloqueie, porque
+#                    `prioridade: tempo real` foi deliberadamente deixada
+#                    fora do que o eixo oferece.
+#
+# Se algo do lado do compositor falhar DEPOIS disto, os dois próximos
+# suspeitos são MemoryDenyWriteExecute (vale para o filho depois do exec)
+# e o ProtectHome ainda ser read-only, caso o gamescopectl precise criar
+# arquivo no runtime dir.
 #
 # ProtectProc fica no padrão porque a detecção de jogo varre /proc. E
 # ProcSubset=pid quebraria a leitura de /proc/stat, de onde sai o btime.
@@ -51,7 +121,13 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateNetwork=yes
 ProtectSystem=strict
-ProtectHome=yes
+# `read-only` e não `yes`: `yes` esvazia /run/user junto com /home, e o
+# socket do gamescope mora lá. Read-only mantém /home e /root
+# inescrevíveis e deixa o socket visível — connect() não precisa de
+# montagem escrivível. O que se perde para `yes` é que o daemon passa a
+# poder LER /home; ele não lê, e é justamente por isso que não resolve o
+# nome do jogo pelo appmanifest.
+ProtectHome=read-only
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 ProtectClock=yes
@@ -70,10 +146,18 @@ MemoryDenyWriteExecute=yes
 ReadWritePaths=/sys/devices/system/cpu
 ReadWritePaths=-/sys/devices
 
-# CAP_SYS_NICE para baixar o nice de processo alheio; CAP_SYS_PTRACE para
-# o fallback de detecção que lê /proc/PID/environ de processo de outro
-# usuário — o detector primário, pelo cgroup, não precisa dele.
-CapabilityBoundingSet=CAP_SYS_NICE CAP_SYS_PTRACE CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+# Uma linha por motivo, para a lista não virar um bloco que ninguém ousa
+# encurtar. Ver as três concessões no cabeçalho.
+#
+#   CAP_SYS_NICE     baixar o nice de processo de outro usuário
+#   CAP_SYS_PTRACE   ler /proc/PID/environ alheio — fallback da detecção
+#                    de jogo e descoberta da sessão gráfica
+#   CAP_SETUID       setuid() para o uid da sessão antes do gamescopectl
+#   CAP_SETGID       setgid() e setgroups([]) na mesma queda
+#   CAP_DAC_OVERRIDE escrever nós de sysfs que são 0644 de root
+#   CAP_CHOWN        RuntimeDirectory/StateDirectory
+#   CAP_FOWNER       idem
+CapabilityBoundingSet=CAP_SYS_NICE CAP_SYS_PTRACE CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
 
 [Install]
 WantedBy=multi-user.target

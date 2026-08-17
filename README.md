@@ -334,6 +334,26 @@ Wayland client waiting on a compositor that went away is a client that blocks,
 and a blocked publish loop is a frozen `at`, which the launcher correctly reads
 as stalled telemetry.
 
+That drop cost the unit two things, and both failed silently on the first boot
+with the same contextless `Operation not permitted`:
+
+- **`CAP_SETUID` and `CAP_SETGID`.** `setuid(1000)` needs the capability *even
+  when dropping* privilege — the kernel does not look at the direction, it looks
+  at whether the target uid is one the process already holds. `setgid()` and
+  `setgroups([])` need `CAP_SETGID` for the same reason.
+- **`ProtectHome=` loosened from `yes` to `read-only`.** `yes` makes `/home`,
+  `/root` *and `/run/user`* inaccessible, and the gamescope socket lives in
+  `/run/user/<uid>/`. Nothing in the log pointed at this: session discovery reads
+  the path out of a process's environment, never out of the directory, so it
+  reports success while the directory is empty as far as the unit is concerned.
+  `read-only` keeps `/home` and `/root` unwritable; `connect()` on a socket is
+  not blocked by a read-only mount, since the kernel only refuses writes to
+  regular files, directories and symlinks.
+
+The unit's header enumerates all three hardening concessions this daemon has
+made, each with what it bought and what the alternative would have cost. Read it
+before shortening the capability list.
+
 **Restore is assumed, not captured — until the getter proves otherwise.** This is
 the one place this axis is weaker than `governor`, and the difference deserves
 saying out loud. The governor reads the previous value out of sysfs before
