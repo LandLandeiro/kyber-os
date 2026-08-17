@@ -196,3 +196,18 @@ def sessao_steam(raiz, appid=553850, inicio_s=120):
     processo(raiz, 1400, comm="chromium", starttime=8 * HZ,
              cgroup=f"{SCOPE}/app-kyber.scope")
     return raiz
+
+
+def set_nice(raiz, pid, nice):
+    """Reescreve o campo 19 de /proc/PID/stat.
+
+    O ops falso usa isto para que a releitura do eixo de prioridade veja o
+    efeito da escrita — sem isso o teste verificaria a chamada e não o
+    resultado, que é justamente a diferença que a releitura existe para
+    pegar."""
+    caminho = Path(raiz) / "proc" / str(pid) / "stat"
+    texto = caminho.read_text().rstrip("\n")
+    cabeca, resto = texto[:texto.rindex(")") + 1], texto[texto.rindex(")") + 1:]
+    campos = resto.split()
+    campos[16] = str(nice)
+    caminho.write_text(f"{cabeca} {' '.join(campos)}\n")
