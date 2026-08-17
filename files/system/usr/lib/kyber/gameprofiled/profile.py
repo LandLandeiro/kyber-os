@@ -21,14 +21,27 @@ from . import axes as axes_mod
 
 
 class ProfileManager:
-    def __init__(self, fs, config, gpu=None, ops=None, log=None):
+    def __init__(self, fs, config, gpu=None, ops=None, log=None,
+                 apply_enabled=True):
         self.fs = fs
         self.config = config
         self.log = log or (lambda _: None)
+        self.ops = ops
+        self.apply_enabled = apply_enabled
         self.axes = axes_mod.build(fs, gpu, ops)
         self.appid = None
         self.capturado = {}
         self.estado = {chave: eixo._observed() for chave, eixo in self.axes.items()}
+
+    def rebind_gpu(self, gpu):
+        """Troca o eixo de GPU quando a redescoberta acha outro caminho.
+
+        O nó de DPM mora sob o card, e o card muda de caminho quando o
+        driver rebinda. Sem isto o eixo seguiria escrevendo num caminho que
+        já não existe e reportando `failed` para sempre."""
+        self.axes["gpuLevel"] = axes_mod.GpuLevel(self.fs, gpu)
+        if self.appid is None:
+            self.estado["gpuLevel"] = self.axes["gpuLevel"]._observed()
 
     # ------------------------------------------------------------------
     def sync(self, jogo):
@@ -66,6 +79,19 @@ class ProfileManager:
         perfil = self.config.profile_for(jogo.appid)
         contexto = self._contexto(jogo)
 
+        if not self.apply_enabled:
+            # --no-apply. O jogo continua sendo detectado e publicado; o
+            # que não acontece é a escrita. O estado sai como `observed`
+            # com o pedido preservado, para dar para ver o que ACONTECERIA
+            # sem mexer numa máquina que ainda não se conhece.
+            self.estado = {}
+            for chave, eixo in self.axes.items():
+                resultado = eixo._observed(contexto)
+                resultado.requested = perfil.get(chave)
+                resultado.note = "daemon em --no-apply; nada foi escrito"
+                self.estado[chave] = resultado
+            return
+
         # Captura ANTES de escrever. Só o que a máquina guarda entre
         # sessões precisa voltar: prioridade morre com o processo, e
         # fpsLimit nunca chegou a ser escrito.
@@ -82,6 +108,8 @@ class ProfileManager:
                      + (f" — {resultado.note}" if resultado.note else ""))
 
     def _reaplicar_prioridade(self, jogo):
+        if not self.apply_enabled:
+            return
         eixo = self.axes["priority"]
         pedido = self.estado["priority"].requested
         if pedido is None:
@@ -89,6 +117,10 @@ class ProfileManager:
         self.estado["priority"] = eixo.apply(pedido, self._contexto(jogo))
 
     def _restaurar(self):
+        if not self.apply_enabled:
+            self.capturado = {}
+            self.estado = {c: e._observed() for c, e in self.axes.items()}
+            return
         for chave in ("governor", "gpuLevel"):
             salvo = self.capturado.get(chave)
             resultado = self.axes[chave].restore(salvo)
