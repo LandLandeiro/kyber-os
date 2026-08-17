@@ -15,12 +15,13 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from gameprofiled import config, games, profile, sensors, state
+from gameprofiled import config, games, profile, score, sensors, state
 from gameprofiled.__main__ import Daemon, parse_args
 from gameprofiled.fs import Fs
 
 from . import fakefs
 from .test_axes import OpsFalso
+from .test_session import RunnerFalso
 
 
 class Relogio:
@@ -143,9 +144,12 @@ class DaemonBase(unittest.TestCase):
         self.log = []
         self.relogio = Relogio()
 
+    runner = None
+
     def daemon(self, *extra):
         opcoes = parse_args(["--root", str(self.raiz), *extra])
-        d = Daemon(opcoes, self.log.append, self.relogio, self.relogio)
+        d = Daemon(opcoes, self.log.append, self.relogio, self.relogio,
+                   runner=self.runner)
         d.manager.ops = OpsFalso(self.raiz)
         d.manager.axes["priority"].ops = d.manager.ops
         return d
@@ -372,3 +376,117 @@ class TestDaemonConsole(DaemonBase):
         self.relogio.avancar()
         d.tick()
         self.assertEqual(self.governor(), "schedutil")
+
+
+class TestLimiteDeQuadros(DaemonBase):
+    """O eixo que deixou de ser unsupported.
+
+    Os testes montam a sessão gráfica na árvore falsa e trocam o runner
+    por um duplo: o gamescopectl não existe num Mac, e mesmo no console
+    executá-lo daqui mexeria numa sessão de verdade.
+    """
+
+    montar = staticmethod(fakefs.intel_rx7600)
+
+    def setUp(self):
+        super().setUp()
+        fakefs.sessao_steam(self.raiz)
+        fakefs.sessao_gamescope(self.raiz)
+        fakefs.gamescopectl(self.raiz)
+        self.runner = RunnerFalso({
+            "help": (0, fakefs.HELP_COM_CONVAR, ""),
+            "debug_set_fps_limit": (0, "0\n", ""),
+        })
+
+    def eixo(self):
+        return self.publicado()["profile"]["axes"]["fpsLimit"]
+
+    def escritas(self):
+        return [c["argv"][2] for c in self.runner.chamadas if len(c["argv"]) == 3]
+
+    # ----------------------------------------------------------------
+    def test_o_eixo_deixa_de_ser_unsupported(self):
+        d = self.daemon()
+        d.tick()
+        eixo = self.eixo()
+        self.assertEqual(eixo["state"], "applied")
+        self.assertEqual(eixo["available"], ["30", "60", "120", "sem limite"])
+        # O perfil padrão pede `sem limite`, que é zero para o convar.
+        self.assertEqual(self.escritas()[-1], "0")
+
+    def test_a_regua_alcanca_AGRESSIVO(self):
+        # A consequência no modelo de escore: com o fpsLimit aplicável, o
+        # máximo alcançável sobe de 5 para 7 de 8, e `hot` exige 6.
+        alcancavel = {"governor": "performance", "gpuLevel": "alto",
+                      "fpsLimit": "sem limite", "priority": "alta"}
+        self.assertEqual(score.score_of(alcancavel), 7)
+        self.assertEqual(score.level_of(7), "hot")
+
+        d = self.daemon()
+        d.tick()
+        corrente = d.manager.current_profile()
+        # O perfil de fábrica (gpuLevel auto) dá 6, que já é AGRESSIVO.
+        self.assertEqual(score.score_of(corrente), 6)
+        self.assertEqual(self.publicado()["intensity"], 0.75)
+
+    def test_saida_do_jogo_solta_o_limite(self):
+        d = self.daemon()
+        d.tick()
+        self.assertIn("0", self.escritas())
+
+        for pid in (1200, 1201, 1202):
+            (self.raiz / "proc" / str(pid) / "cgroup").unlink()
+            (self.raiz / "proc" / str(pid) / "environ").unlink(missing_ok=True)
+            (self.raiz / "proc" / str(pid) / "cmdline").unlink(missing_ok=True)
+        self.relogio.avancar()
+        d.tick()
+        # Console preso a 30 fps depois de fechar o jogo é a mesma classe
+        # de falha que o governor preso em performance.
+        self.assertEqual(self.escritas()[-1], "0")
+
+    def test_sem_sessao_e_unavailable_e_nao_unsupported(self):
+        for entrada in (self.raiz / "proc/1400").iterdir():
+            entrada.unlink()
+        d = self.daemon()
+        d.tick()
+        eixo = self.eixo()
+        self.assertEqual(eixo["state"], "unavailable")
+        self.assertEqual(eixo["available"], [])
+
+    def test_convar_que_some_numa_atualizacao_volta_a_unsupported(self):
+        # O prefixo `debug_` não é decoração.
+        self.runner = RunnerFalso({"help": (0, fakefs.HELP_SEM_CONVAR, "")})
+        d = self.daemon()
+        d.tick()
+        eixo = self.eixo()
+        self.assertEqual(eixo["state"], "unsupported")
+        self.assertEqual(eixo["available"], [])
+        self.assertIn("debug_set_fps_limit", eixo["note"])
+        # E o log guarda o que se procurou, para o nome novo ficar a uma
+        # linha de journal de distância.
+        self.assertTrue(any("fpsLimit" in l for l in self.log))
+
+    def test_sessao_que_aparece_depois_do_start_e_apanhada(self):
+        # O daemon sobe no multi-user.target; a sessão só existe depois do
+        # login. Ficar `unavailable` para sempre seria o defeito.
+        for entrada in (self.raiz / "proc/1400").iterdir():
+            entrada.unlink()
+        d = self.daemon()
+        d.tick()
+        self.assertEqual(self.eixo()["state"], "unavailable")
+
+        fakefs.sessao_gamescope(self.raiz)
+        self.relogio.avancar(fakefs.HZ)   # passa a janela de rebusca
+        d.tick()
+        self.assertEqual(self.eixo()["state"], "applied")
+
+    def test_raiz_simulada_nao_fala_com_compositor_nenhum(self):
+        # Sem runner injetado, --root instala o SimulatedRunner. O caminho
+        # do gamescopectl é absoluto e o uid vem de um /proc falso: numa
+        # máquina Linux isto executaria o binário real contra a sessão
+        # real de quem está inspecionando.
+        self.runner = None
+        d = self.daemon()
+        d.tick()
+        self.assertEqual(self.eixo()["state"], "unavailable")
+        self.assertIn("raiz simulada", self.eixo()["note"])

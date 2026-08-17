@@ -211,3 +211,63 @@ def set_nice(raiz, pid, nice):
     campos = resto.split()
     campos[16] = str(nice)
     caminho.write_text(f"{cabeca} {' '.join(campos)}\n")
+
+
+# ----------------------------------------------------------------------
+# A sessão gráfica.
+#
+# O marcador é o GAMESCOPE_WAYLAND_DISPLAY, que o gamescope-session-plus
+# define depois que o gamescope reporta o socket e que tudo iniciado por
+# ele herda — o Chromium do launcher inclusive.
+# ----------------------------------------------------------------------
+UID = 1000
+GID = 1000
+
+
+def _status(raiz, pid, uid=UID, gid=GID):
+    _escrever(Path(raiz) / "proc" / str(pid) / "status",
+              f"Name:\tchromium\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\n"
+              f"Gid:\t{gid}\t{gid}\t{gid}\t{gid}")
+
+
+def sessao_gamescope(raiz, pid=1400, display="gamescope-0", uid=UID, gid=GID,
+                     marcador=b"GAMESCOPE_WAYLAND_DISPLAY"):
+    """O processo do launcher, dentro da sessão, com o ambiente que o
+    session-plus lhe deu."""
+    raiz = Path(raiz)
+    proc(raiz)
+    processo(raiz, pid, comm="chromium", starttime=8 * HZ,
+             cgroup=f"{SCOPE}/app-kyber.scope",
+             environ=[b"HOME=/var/home/kyber",
+                      f"XDG_RUNTIME_DIR=/run/user/{uid}".encode(),
+                      marcador + b"=" + display.encode()])
+    _status(raiz, pid, uid, gid)
+    return raiz
+
+
+def socket_gamescope(raiz, display="gamescope-0", uid=UID, gid=GID):
+    """Só o socket, sem processo anunciando — sessão iniciada fora do
+    gamescope-session-plus."""
+    caminho = Path(raiz) / "run/user" / str(uid) / display
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    caminho.write_text("")
+    return caminho
+
+
+def gamescopectl(raiz):
+    """O binário existindo. O conteúdo não importa: nada o executa nos
+    testes, o runner é falso."""
+    _escrever(Path(raiz) / "usr/bin/gamescopectl", "#!/bin/sh\n")
+    return raiz
+
+
+HELP_COM_CONVAR = """convars:
+  debug_hdr_debug_force_output
+  debug_set_fps_limit
+  vblank_debug
+"""
+
+HELP_SEM_CONVAR = """convars:
+  debug_hdr_debug_force_output
+  vblank_debug
+"""

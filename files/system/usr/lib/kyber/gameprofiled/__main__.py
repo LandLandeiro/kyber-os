@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-from . import VERSION, games, sensors, state
+from . import VERSION, games, sensors, session as sessao_mod, state
 from .config import Config
 from .fs import Fs
 from .profile import ProfileManager
@@ -41,6 +41,25 @@ class SimulatedOps:
     def set_ioprio(self, pid, classe, nivel):
         return self.MOTIVO
 
+
+class SimulatedRunner:
+    """O mesmo perigo do SimulatedOps, por outra porta, e pior.
+
+    `--root` troca o filesystem e só ele. O caminho do gamescopectl é
+    ABSOLUTO — tem que ser, senão o daemon resolveria PATH para dentro do
+    ambiente de um usuário — e o uid vem de um /proc falso. Numa máquina
+    Linux de verdade, rodar a demonstração com uma árvore falsa que
+    contenha um marcador de gamescopectl executaria o binário REAL contra
+    a sessão REAL de quem está inspecionando, mudando o limite de quadros
+    da tela em que a pessoa está olhando.
+
+    Raiz simulada não fala com compositor nenhum."""
+
+    MOTIVO = "raiz simulada (--root); nenhum compositor real foi tocado"
+
+    def __call__(self, argv, env, uid, gid, timeout):
+        return None, "", self.MOTIVO
+
 # Depois de tantas leituras vazias seguidas de um sensor que ANTES
 # respondia, o caminho provavelmente morreu — driver recarregado, GPU
 # suspensa, dispositivo rebindado. Redescobrir é barato; varrer o sysfs a
@@ -51,6 +70,13 @@ FALHAS_ATE_REDESCOBRIR = 3
 # log. Por leitura seria uma linha por segundo; só no start, uma linha por
 # boot, e ninguém repara que a régua está errada olhando uma vez.
 COMPARACAO_S = 600
+
+# De quanto em quanto tempo se varre /proc atrás de uma sessão gráfica
+# quando não há nenhuma conhecida. A varredura lê o environ de cada
+# processo, o que é caro demais para uma vez por segundo — e a sessão
+# aparece uma vez por boot. Com sessão conhecida, a checagem é uma leitura
+# só, do /proc do processo que a revelou.
+BUSCA_SESSAO_S = 15
 
 
 def parse_args(argv=None):
@@ -78,7 +104,7 @@ def make_log(saida=sys.stderr):
 
 class Daemon:
     def __init__(self, opcoes, log=None, relogio=time.time,
-                 cronometro=time.monotonic):
+                 cronometro=time.monotonic, runner=None):
         """Dois relógios, e não é descuido.
 
         `relogio` é tempo de parede: carimba o `at` que o launcher compara
@@ -117,13 +143,26 @@ class Daemon:
 
         self.discover()
         simulando = str(opcoes.root) != "/"
+        self.runner = runner or (SimulatedRunner() if simulando
+                                 else sessao_mod.SubprocessRunner())
+        self.sessao = None
+        self.compositor = sessao_mod.Compositor(self.fs, runner=self.runner)
+        self._ultima_busca = None
+        # Sonda antes de procurar sessão: a camada do binário se resolve
+        # sem sessão nenhuma, e uma máquina sem gamescopectl é
+        # `unsupported` desde o primeiro segundo em vez de ficar
+        # `unavailable` esperando um login que não vai mudar nada.
+        self._sondar()
+        self.buscar_sessao(inicial=True)
+
         if simulando:
             self.log("daemon   raiz simulada em " + str(opcoes.root)
-                     + " — nenhum processo real será tocado")
+                     + " — nenhum processo nem compositor real será tocado")
         self.manager = ProfileManager(
             self.fs, self.config, self.gpu,
             ops=SimulatedOps() if simulando else None,
-            log=self.log, apply_enabled=not opcoes.no_apply)
+            log=self.log, apply_enabled=not opcoes.no_apply,
+            compositor=self.compositor)
         self._log_eixos()
 
     # ------------------------------------------------------------------
@@ -143,6 +182,57 @@ class Daemon:
             if fonte and fonte.kind == "measured":
                 rotulo = f", {fonte.label}" if fonte.label else ""
                 self.log(f"sensor {nome:<9} {fonte.path} ({fonte.driver}{rotulo})")
+
+    # ------------------------------------------------------------------
+    def buscar_sessao(self, inicial=False):
+        """Acha (ou reacha) a sessão gráfica e re-sonda o compositor.
+
+        O daemon sobe no multi-user.target e a sessão só existe depois do
+        login, então no start não há o que achar — e isso não é falha, é
+        ordem de boot. A busca se repete de tempos em tempos até aparecer.
+
+        A checagem barata vem primeiro: se o processo que revelou a sessão
+        continua vivo e continua anunciando o mesmo display, não há o que
+        procurar. Só quando ele some é que se varre /proc de novo, porque
+        varrer significa ler o environ de cada processo da máquina."""
+        agora = self.relogio()
+
+        if self.sessao and self._sessao_viva():
+            return False
+        if not inicial and self._ultima_busca is not None \
+                and agora - self._ultima_busca < BUSCA_SESSAO_S:
+            return False
+        self._ultima_busca = agora
+
+        achada = sessao_mod.find_session(self.fs, self.log)
+        if achada is None and self.sessao is None:
+            return False
+        if achada is not None and self.sessao is not None \
+                and achada.chave == self.sessao.chave:
+            return False
+
+        self.sessao = achada
+        self.compositor = sessao_mod.Compositor(self.fs, achada, self.runner)
+        self._sondar()
+
+        if getattr(self, "manager", None) is not None:
+            self.manager.rebind_session(self.compositor)
+        return True
+
+    def _sondar(self):
+        suporte = self.compositor.probe()
+        self.log(f"eixo   fpsLimit  {suporte}"
+                 + (" · com releitura" if self.compositor.getter else "")
+                 + (f" — {self.compositor.nota}" if self.compositor.nota else ""))
+        return suporte
+
+    def _sessao_viva(self):
+        """O processo que revelou a sessão ainda está lá e ainda é ela."""
+        if self.sessao.pid == 0:
+            return self.fs.exists(f"{self.sessao.runtime_dir}/{self.sessao.display}")
+        ambiente = sessao_mod._environ(self.fs, self.sessao.pid)
+        return ambiente.get("GAMESCOPE_WAYLAND_DISPLAY") == self.sessao.display \
+            or ambiente.get("WAYLAND_DISPLAY") == self.sessao.display
 
     def _log_eixos(self):
         for chave, eixo in self.manager.axes.items():
@@ -224,6 +314,7 @@ class Daemon:
     def tick(self):
         agora = self.relogio()
         self.config.reload()
+        self.buscar_sessao()
 
         jogo = games.find_running_game(self.fs, self.log)
         self.manager.sync(jogo)

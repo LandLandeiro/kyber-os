@@ -10,8 +10,11 @@ tratar todos como se funcionassem:
              AJUSTE é verificável; o EFEITO só tem evidência indireta.
   priority   nice e ionice na árvore de processos do jogo. Depende de haver
              jogo detectado.
-  fpsLimit   não existe arquivo de kernel para isso. Quem limita quadro é o
-             compositor. O daemon não tem onde escrever e não finge que tem.
+  fpsLimit   não existe arquivo de kernel para isso, e continua não
+             existindo: quem limita quadro é o compositor. O que existe é
+             o `gamescopectl`, que fala com o gamescope em runtime — ver
+             session.py. A presença do convar é DETECTADA a cada sessão, e
+             quando ela falha o eixo volta a `unsupported` com a razão.
 
 Os estados que um eixo publica, e o que cada um significa para a tela:
 
@@ -286,23 +289,141 @@ class GpuLevel(Axis):
 
 # ----------------------------------------------------------------------
 class FpsLimit(Axis):
+    """Limite de quadros, pelo compositor.
+
+    Continua não existindo arquivo de kernel para isto. O que existe é o
+    `gamescopectl`, que fala com o gamescope em runtime pelo protocolo
+    gamescope_control — e falar com ele é atravessar para dentro de uma
+    sessão de usuário. A travessia mora em session.py; aqui só se decide
+    o que pedir e o que reportar.
+
+    O QUE `applied` PODE HONESTAMENTE QUERER DIZER AQUI. Depende de haver
+    releitura, e isso é descoberto e não assumido. Com getter, este eixo
+    tem a mesma prova que o governor tem: escreve, relê, compara. Sem
+    getter, `applied` quer dizer que o comando saiu com código 0 — e a
+    nota do eixo diz isso, porque um sucesso de código de saída não é um
+    sucesso medido.
+
+    A RESTAURAÇÃO É ASSUMIDA, NÃO CAPTURADA — enquanto não houver getter.
+    Aqui está a diferença entre este eixo e o governor, e ela merece ser
+    dita em voz alta: o governor lê o valor anterior do sysfs antes de
+    escrever, então devolve exatamente o que encontrou. Este, sem getter,
+    não tem o que capturar e devolve `sem limite`.
+
+    E `sem limite` é SUPOSIÇÃO. A sessão de fato começa sem limite, mas
+    isso não faz do daemon o único escritor: o gamescopectl é público e
+    qualquer processo da sessão — ou qualquer pessoa por SSH — pode ter
+    escrito um limite antes de nós. Restaurar para zero apaga o que essa
+    outra mão tiver feito.
+
+    Segue sendo o que se faz, por uma razão só: tirar limite nunca trava
+    console, e ficar preso a 30 fps depois de fechar o jogo é a mesma
+    classe de falha que o governor preso em performance. A direção segura
+    é a de soltar. Com getter, a captura é real e esta ressalva some.
+    """
+
     key = "fpsLimit"
 
-    # Não há arquivo de kernel para limitar quadro. O limite é do
-    # compositor, e o daemon não fala com ele. Ver o README: os três
-    # caminhos possíveis passam todos pelo gamescope, e nenhum passa aqui.
-    NOTA = ("sem superfície de kernel — quem limita quadro é o gamescope, "
-            "e o daemon não tem canal com ele")
+    SEM_LIMITE = "sem limite"
+
+    NOTA_SEM_CANAL = ("sem superfície de kernel — quem limita quadro é o "
+                      "gamescope, e não há canal com ele nesta máquina")
+
+    def __init__(self, fs, compositor=None):
+        super().__init__(fs)
+        self.compositor = compositor
+
+    # ------------------------------------------------------------------
+    def _quadros(self, value):
+        """Vocabulário do console → o argumento do convar. Zero é solto."""
+        if value == self.SEM_LIMITE:
+            return 0
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _rotulo(self, quadros):
+        if quadros is None:
+            return None
+        if quadros <= 0:
+            return self.SEM_LIMITE
+        return str(quadros)
+
+    def _suporte(self):
+        return self.compositor.suporte if self.compositor else "unsupported"
+
+    def _nota(self):
+        if not self.compositor:
+            return self.NOTA_SEM_CANAL
+        return self.compositor.nota
+
+    # ------------------------------------------------------------------
+    def available(self):
+        return list(score.FPS_LIMIT) if self._suporte() == "ok" else []
+
+    def read(self, ctx=None):
+        if self._suporte() != "ok" or not self.compositor.getter:
+            return None
+        return self._rotulo(self.compositor.get_limit())
 
     def apply(self, value, ctx=None):
-        return AxisState(requested=value, current=None, state="unsupported",
-                         available=[], note=self.NOTA)
+        suporte = self._suporte()
+        if suporte != "ok":
+            return AxisState(requested=value, current=None, state=suporte,
+                             available=[], note=self._nota())
+
+        quadros = self._quadros(value)
+        if quadros is None:
+            return AxisState(requested=value, current=self.read(ctx),
+                             state="unavailable", available=self.available(),
+                             note=f"{value} não é um limite de quadros conhecido")
+
+        erro = self.compositor.set_limit(quadros)
+        if erro:
+            return AxisState(requested=value, current=self.read(ctx),
+                             state="failed", available=self.available(), note=erro)
+
+        atual = self.read(ctx)
+        if atual is None:
+            # Sem releitura não há prova, e a nota não deixa `applied`
+            # passar por medição.
+            return AxisState(requested=value, current=value, state="applied",
+                             available=self.available(), note=self._nota())
+        if atual != value:
+            return AxisState(requested=value, current=atual, state="degraded",
+                             available=self.available(),
+                             note=f"pedido {value}, releitura devolveu {atual}")
+        return AxisState(requested=value, current=atual, state="applied",
+                         available=self.available())
 
     def restore(self, saved, ctx=None):
-        return AxisState(state="unsupported", available=[], note=self.NOTA)
+        if self._suporte() != "ok":
+            return self._observed(ctx)
+
+        # `saved` só existe quando há getter. Sem ele o eixo devolve a
+        # `sem limite`, e a nota diz que é suposição — ver a nota da
+        # classe. Zero é a direção segura em qualquer um dos dois casos.
+        assumido = saved is None
+        alvo = 0 if assumido else self._quadros(saved)
+        erro = self.compositor.set_limit(alvo if alvo is not None else 0)
+
+        estado = self._observed(ctx)
+        if erro:
+            estado.state = "failed"
+            estado.note = erro
+        elif assumido:
+            estado.note = ("devolvido a sem limite por SUPOSIÇÃO: não há "
+                           "releitura para capturar o que havia antes, e "
+                           "outro processo da sessão pode ter posto um limite")
+        return estado
 
     def _observed(self, ctx=None):
-        return AxisState(state="unsupported", available=[], note=self.NOTA)
+        suporte = self._suporte()
+        if suporte != "ok":
+            return AxisState(state=suporte, available=[], note=self._nota())
+        return AxisState(current=self.read(ctx), state="observed",
+                         available=self.available(), note=self._nota())
 
 
 # ----------------------------------------------------------------------
@@ -381,10 +502,10 @@ class Priority(Axis):
                          note="nada a restaurar — os processos renicados eram do jogo")
 
 
-def build(fs, gpu=None, ops=None):
+def build(fs, gpu=None, ops=None, compositor=None):
     return {
         "governor": Governor(fs),
         "gpuLevel": GpuLevel(fs, gpu),
-        "fpsLimit": FpsLimit(fs),
+        "fpsLimit": FpsLimit(fs, compositor),
         "priority": Priority(fs, ops),
     }
