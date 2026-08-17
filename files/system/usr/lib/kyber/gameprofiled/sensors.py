@@ -49,11 +49,15 @@ _RAPL_PACKAGE = re.compile(r"^intel-rapl:\d+$")
 class Source:
     """De onde veio um número — ou por que não veio nenhum.
 
-    Vai inteiro para o state.json. O launcher usa `kind` para separar
-    medição de estimativa, que é uma distinção que a régua já sabe
-    desenhar; o resto é para depurar sem abrir o journal."""
+    Vai inteira para o state.json, INCLUSIVE quando não há sensor: `kind:
+    absent` com a nota dizendo onde se procurou. Campo que some sem
+    explicação obriga quem depura a abrir o journal para descobrir se o
+    traço no header é falta de sensor, driver não carregado ou defeito.
 
-    kind: str  # 'measured' | 'estimated'
+    O launcher usa `kind` para separar medição de estimativa, que é uma
+    distinção que a régua já sabe desenhar."""
+
+    kind: str  # 'measured' | 'estimated' | 'absent'
     driver: str = None
     path: str = None
     label: str = None
@@ -89,9 +93,10 @@ class Gpu:
 # ----------------------------------------------------------------------
 class Missing:
     """Sensor que não existe. Lê None para sempre, sem caso especial em
-    quem chama."""
+    quem chama, e carrega a explicação de por que não existe."""
 
-    source = None
+    def __init__(self, note=None):
+        self.source = Source("absent", note=note)
 
     def read(self):
         return None
@@ -226,10 +231,11 @@ def find_cpu_temp(fs, log=None):
                        note="zona térmica do ACPI; não há hwmon de CPU nesta máquina"),
             )
 
-    if log:
-        log("sensor cpuTemp  ausente — procurado em /sys/class/hwmon/*/name "
+    nota = ("procurado em /sys/class/hwmon/*/name "
             f"({', '.join(CPU_TEMP_DRIVERS)}) e em /sys/class/thermal/*/type")
-    return Missing()
+    if log:
+        log(f"sensor cpuTemp  ausente — {nota}")
+    return Missing(nota)
 
 
 def find_gpu(fs, log=None):
@@ -282,18 +288,22 @@ def _card_index(card):
 
 def find_gpu_temp(fs, gpu, log=None):
     if gpu is None or gpu.hwmon is None:
+        nota = ("a placa não expõe hwmon próprio; numa APU isso é esperado, "
+                "porque a GPU divide o die com a CPU e não tem sensor separado")
         if log:
-            log("sensor gpuTemp  ausente — a placa não expõe hwmon próprio. "
-                "Numa APU isso é esperado: a GPU divide o die com a CPU e "
-                "não tem sensor separado. Copiar o cpuTemp para cá daria "
-                "duas células idênticas no header, que lê como defeito.")
-        return Missing()
+            log(f"sensor gpuTemp  ausente — {nota}. Copiar o cpuTemp para cá "
+                "daria duas células idênticas no header, que lê como defeito.")
+        return Missing(nota)
 
     caminho, rotulo = _pick_temp(_temp_inputs(fs, gpu.hwmon), GPU_TEMP_LABELS)
     if caminho is None:
+        nota = (f"{fs.show(gpu.hwmon)} existe mas não tem temp*_input; "
+                "numa APU isso é esperado, porque a GPU divide o die com a "
+                "CPU e não tem sensor separado")
         if log:
-            log(f"sensor gpuTemp  ausente — {fs.show(gpu.hwmon)} não tem temp*_input")
-        return Missing()
+            log(f"sensor gpuTemp  ausente — {nota}. Copiar o cpuTemp para cá "
+                "daria duas células idênticas no header, que lê como defeito.")
+        return Missing(nota)
 
     return MilliDegrees(
         fs, caminho,
@@ -303,7 +313,7 @@ def find_gpu_temp(fs, gpu, log=None):
 
 def find_gpu_power(fs, gpu, log=None):
     if gpu is None or gpu.hwmon is None:
-        return Missing()
+        return Missing("nenhuma GPU amdgpu com hwmon")
     for nome in ("power1_average", "power1_input"):
         caminho = gpu.hwmon / nome
         if fs.exists(caminho):
@@ -311,9 +321,10 @@ def find_gpu_power(fs, gpu, log=None):
                 fs, caminho,
                 Source("measured", driver="amdgpu", path=fs.show(caminho), covers="gpu"),
             )
+    nota = f"{fs.show(gpu.hwmon)} não tem power1_average nem power1_input"
     if log:
-        log(f"sensor gpuWatts ausente — {fs.show(gpu.hwmon)} não tem power1_average")
-    return Missing()
+        log(f"sensor gpuWatts ausente — {nota}")
+    return Missing(nota)
 
 
 def find_cpu_power(fs, log=None, relogio=time.monotonic):
@@ -341,6 +352,7 @@ def find_cpu_power(fs, log=None, relogio=time.monotonic):
             relogio=relogio,
         )
 
+    nota = "procurado em /sys/class/powercap/intel-rapl:*/name"
     if log:
-        log("sensor cpuWatts ausente — procurado em /sys/class/powercap/intel-rapl:*/name")
-    return Missing()
+        log(f"sensor cpuWatts ausente — {nota}")
+    return Missing(nota)

@@ -9,3 +9,8 @@ cosign.private
 # Versionar a cópia de volta recria a divergência silenciosa que ela causou.
 /files/system/usr/share/kyber/launcher/
 /.kyber-shell/
+
+# Bytecode do gameprofiled. A arvore em files/system/ vira /usr na imagem,
+# e __pycache__ compilado num Mac nao tem o que fazer ali dentro.
+__pycache__/
+*.pyc

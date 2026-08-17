@@ -105,7 +105,10 @@ class TestConsole(Base):
         # ...e mesmo assim não há temperatura. Zero seria mentira e copiar
         # o cpuTemp daria duas células idênticas no header.
         self.assertIsNone(sensor.read())
-        self.assertIsNone(sensor.source)
+        # Ausência se explica: o traço no header tem motivo escrito.
+        self.assertEqual(sensor.source.kind, "absent")
+        self.assertIn("não tem temp*_input", sensor.source.note)
+        self.assertIn("die com a CPU", sensor.source.note)
         self.assertTrue(any("ausente" in linha for linha in self.log))
 
     def test_rapl_da_amd_usa_o_mesmo_caminho_da_intel(self):
@@ -123,7 +126,8 @@ class TestSemSensor(Base):
             sensors.find_cpu_power(self.fs, self.log.append),
         ):
             self.assertIsNone(sensor.read())
-            self.assertIsNone(sensor.source)
+            self.assertEqual(sensor.source.kind, "absent")
+            self.assertTrue(sensor.source.note)
         self.assertIsNone(sensors.find_gpu(self.fs, self.log.append))
 
     def test_a_busca_frustrada_vai_para_o_log(self):
