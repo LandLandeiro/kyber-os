@@ -49,6 +49,12 @@ modules:
   # python3 already ships in the base image, and the script module above
   # fails the build if that ever stops being true.
 
+  # `user-tmpfiles.d` e nao `tmpfiles.d`: a limpeza e por sessao de
+  # usuario e usa %t, que so resolve para XDG_RUNTIME_DIR na instancia de
+  # usuario do systemd-tmpfiles. O arquivo vem pelo modulo `files` acima;
+  # nao ha unit a habilitar, porque quem o processa e o
+  # systemd-tmpfiles-setup.service que ja roda em toda sessao.
+
   - type: systemd
     system:
       enabled:
