@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
- <rect width="1920" height="1080" fill="#000000"></rect>
- <text x="960" y="576" text-anchor="middle" font-family="Familjen Grotesk, sans-serif" font-weight="700" font-size="200" letter-spacing="-10" fill="#F1F4F6">KYBER</text>
- <rect x="0" y="1075" width="1920" height="5" fill="#0E1113"></rect>
- <rect x="0" y="1075" width="1536" height="5" fill="#FF8246"></rect>
-</svg>

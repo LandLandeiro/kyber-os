@@ -45,6 +45,67 @@ browser's CORS rules block both and the screen stays blank. `darkhttpd` costs
 Fonts are embedded in the image (152 KB, SIL OFL) rather than loaded from
 Google Fonts. A console has to draw its first screen without a network.
 
+## The launcher
+
+The launcher lives in its own repository, **[kyber-shell](https://github.com/LandLandeiro/kyber-shell)**,
+and is *not* checked into this one. The build fetches it: `.github/workflows/build.yml`
+checks out kyber-shell at a pinned ref and copies `index.html` and `src/` into
+`files/system/usr/share/kyber/launcher/`, where the recipe's `files` module picks
+it up like any other file in the image tree.
+
+Only the runtime half travels. kyber-shell also carries `docs/`, `telas/` and
+`scripts/`, which are development material and stay out of `/usr`.
+
+That path is listed in `.gitignore` on purpose. This repository used to hold a
+hand-copied duplicate of the launcher with nothing explaining how it got there,
+which is a copy that drifts quietly: the image keeps building green while
+shipping a launcher older than the source. Committing the directory back would
+recreate exactly that.
+
+### Updating the launcher in the image
+
+The version is pinned in one place — `KYBER_SHELL_REF` in
+`.github/workflows/build.yml`. To ship new launcher work:
+
+1. Tag the state you want in kyber-shell:
+   ```bash
+   git -C ../kyber-shell tag -a v0.5.0 -m "Etapa 5" && git -C ../kyber-shell push origin v0.5.0
+   ```
+2. Change `KYBER_SHELL_REF` to that tag and push.
+
+It accepts a tag or a full commit SHA, never a branch. A moving branch would
+make yesterday's image unreproducible today, and the whole point of an image is
+that it rebuilds into the same bytes. Prefer a tag: six months from now a bare
+SHA tells nobody which version of the launcher an image shipped. The build log
+prints the resolved commit, so any published image can be traced back to
+launcher source.
+
+If the staged launcher comes up missing or incomplete, the build fails on the
+spot. That check is deliberate — a missing launcher does not break the image
+build on its own, it just produces a console that boots to a connection error,
+which is a far more expensive way to discover the problem.
+
+### Building locally
+
+There is no local build in this repository — no Justfile, no Makefile, no
+script. Builds happen in CI. If you want to reproduce one on a machine with
+`podman` and the [BlueBuild CLI](https://blue-build.org/how-to/setup/), the
+workflow's steps by hand are:
+
+```bash
+# 1. Stage the launcher exactly as CI does, at the pinned ref
+git clone https://github.com/LandLandeiro/kyber-shell .kyber-shell
+git -C .kyber-shell checkout <KYBER_SHELL_REF from build.yml>
+mkdir -p files/system/usr/share/kyber/launcher
+cp -R .kyber-shell/index.html .kyber-shell/src files/system/usr/share/kyber/launcher/
+
+# 2. Build
+bluebuild build ./recipes/recipe.yml
+```
+
+Both `.kyber-shell/` and the staged launcher are gitignored, so a local build
+leaves nothing to accidentally commit.
+
 ## Installation
 
 > [!WARNING]
@@ -122,13 +183,17 @@ podman run --rm ghcr.io/landlandeiro/kyber:latest bash -c '
 
 ### Without any hardware: the launcher in a normal browser
 
-The launcher is plain HTML/CSS/JS, so any machine can run it. Serve it the same
-way the console does and open `http://127.0.0.1:8787`:
+The launcher is plain HTML/CSS/JS, so any machine can run it. Serve it from a
+kyber-shell checkout the same way the console does, and open
+`http://127.0.0.1:8787`:
 
 ```bash
-cd files/system/usr/share/kyber/launcher
+git clone https://github.com/LandLandeiro/kyber-shell && cd kyber-shell
 python3 -m http.server 8787 --bind 127.0.0.1
 ```
+
+Check out the ref pinned in `KYBER_SHELL_REF` if you want the version a
+published image actually shipped, rather than the tip of the branch.
 
 Keyboard navigation stands in for the controller. Two things to confirm here:
 the typography is Familjen Grotesk and Figtree rather than a system fallback,
@@ -211,16 +276,14 @@ published here.
 | --- | --- |
 | `recipes/recipe.yml` | The image definition: base image, version, and modules |
 | `files/system/` | Files copied into the image's root filesystem `/` |
-| `files/system/usr/share/kyber/launcher/` | The launcher, vendored from `kyber-shell` |
 | `files/system/usr/share/gamescope-session-plus/sessions.d/kyber` | The KYBER session definition |
 | `files/system/usr/share/wayland-sessions/kyber.desktop` | Session entry for the display manager |
 | `files/system/usr/lib/systemd/system/` | Custom systemd units |
 | `files/system/etc/sddm.conf.d/` | Autologin override that makes KYBER the default session |
 | `files/scripts/` | Scripts available to the `script` module during build |
 | `modules/` | Custom BlueBuild modules specific to KYBER |
-| `.github/workflows/build.yml` | The build and publish pipeline |
+| `.github/workflows/build.yml` | The build and publish pipeline, and the pinned launcher version |
 | `cosign.pub` | Public key used to verify the published image |
 
-The launcher is developed in a separate tree (`kyber-shell`) and vendored into
-`files/system/usr/share/kyber/launcher/`. Changes there have to be copied back
-into this repository to reach the image.
+The launcher is not in this table because it is not in this repository — see
+[The launcher](#the-launcher) above.

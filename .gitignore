@@ -3,3 +3,9 @@ cosign.private
 /Containerfile
 *.iso
 *.iso-CHECKSUM
+
+# O launcher NÃO mora aqui. O CI o busca do repositório kyber-shell e o
+# deposita neste caminho antes do build (.github/workflows/build.yml).
+# Versionar a cópia de volta recria a divergência silenciosa que ela causou.
+/files/system/usr/share/kyber/launcher/
+/.kyber-shell/

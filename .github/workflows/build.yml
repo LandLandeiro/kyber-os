@@ -28,8 +28,75 @@ jobs:
         recipe:
           # !! Add your recipes here
           - recipe.yml
+    env:
+      # ===================================================================
+      # THE LAUNCHER VERSION. This is the only line to edit when you want
+      # the image to pick up new launcher work.
+      #
+      # Pinned deliberately, never `main`: an image is supposed to be
+      # rebuildable into the same bytes months later, and a moving branch
+      # makes yesterday's build unreproducible. Accept a tag or a full
+      # commit SHA. Prefer a tag — six months from now a SHA tells nobody
+      # which version of the launcher an image shipped.
+      #
+      # To update: tag the new state in the kyber-shell repository, then
+      # change this one line and push. The build log prints the resolved
+      # commit, so you can always tie an image back to launcher source.
+      # ===================================================================
+      KYBER_SHELL_REPO: LandLandeiro/kyber-shell
+      KYBER_SHELL_REF: c89426abc435d99d9be8c2344aa8719542d66d1b
+      # Where the recipe's `files` module expects to find the launcher.
+      KYBER_LAUNCHER_DEST: files/system/usr/share/kyber/launcher
     steps:
-      # the build is fully handled by the reusable github action
+      # We do the checkouts ourselves rather than letting the BlueBuild
+      # action do it. Its internal checkout runs with the default
+      # `clean: true`, so it would `git clean -ffdx` away the launcher we
+      # stage below — and it would do it silently: `files/system/` still
+      # exists, so the recipe builds green and ships an image with no
+      # launcher at all. `skip_checkout: true` on the action below is what
+      # makes this ordering safe.
+      - name: Checkout kyber-os
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout the KYBER launcher
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ env.KYBER_SHELL_REPO }}
+          ref: ${{ env.KYBER_SHELL_REF }}
+          path: .kyber-shell
+          persist-credentials: false
+
+      - name: Stage the launcher into the image tree
+        run: |
+          set -euo pipefail
+
+          # Only the runtime half travels. docs/, telas/ and scripts/ are
+          # development material and have no business inside /usr on a
+          # console.
+          mkdir -p "${KYBER_LAUNCHER_DEST}"
+          cp -R .kyber-shell/index.html .kyber-shell/src "${KYBER_LAUNCHER_DEST}/"
+
+          # Fail loudly here or fail invisibly at boot. A missing launcher
+          # does not break the image build — the session just comes up on a
+          # connection error, which is a far more expensive way to find out.
+          test -f "${KYBER_LAUNCHER_DEST}/index.html"
+          test -f "${KYBER_LAUNCHER_DEST}/src/main.js"
+          test -f "${KYBER_LAUNCHER_DEST}/src/styles/fonts.css"
+
+          # The console has to draw its first screen without a network, so
+          # the fonts are embedded rather than fetched. Losing them is a
+          # regression that renders perfectly well on a developer machine.
+          fonts=$(find "${KYBER_LAUNCHER_DEST}/src/assets/fonts" -name '*.woff2' | wc -l)
+          test "${fonts}" -gt 0
+
+          echo "launcher ${KYBER_SHELL_REPO}@$(git -C .kyber-shell rev-parse HEAD)"
+          echo "  $(find "${KYBER_LAUNCHER_DEST}" -type f | wc -l) files, ${fonts} embedded fonts"
+
+          # Keep the mockups and docs out of the container build context.
+          rm -rf .kyber-shell
+
       - name: Build Custom Image
         uses: blue-build/github-action@v1.11
         with:
@@ -37,6 +104,10 @@ jobs:
           cosign_private_key: ${{ secrets.SIGNING_SECRET }}
           registry_token: ${{ github.token }}
           pr_event_number: ${{ github.event.number }}
+
+          # We checked out above, and the launcher we staged is untracked.
+          # Letting the action check out again would delete it.
+          skip_checkout: true
 
           # enabled by default, disable if your image is small and you want faster builds
           maximize_build_space: true
