@@ -44,7 +44,7 @@ jobs:
       # commit, so you can always tie an image back to launcher source.
       # ===================================================================
       KYBER_SHELL_REPO: LandLandeiro/kyber-shell
-      KYBER_SHELL_REF: c89426abc435d99d9be8c2344aa8719542d66d1b
+      KYBER_SHELL_REF: v0.4.0
       # Where the recipe's `files` module expects to find the launcher.
       KYBER_LAUNCHER_DEST: files/system/usr/share/kyber/launcher
     steps:
@@ -105,8 +105,13 @@ jobs:
           registry_token: ${{ github.token }}
           pr_event_number: ${{ github.event.number }}
 
-          # We checked out above, and the launcher we staged is untracked.
-          # Letting the action check out again would delete it.
+          # Do not remove. This looks redundant because we checked out above,
+          # but the reason it is here is the launcher: the action's internal
+          # checkout runs with `clean: true`, so it would `git clean -ffdx`
+          # away the untracked launcher we just staged. Nothing would go red —
+          # `files/system/` still exists, so the image builds and publishes
+          # green, carrying no launcher at all. The console would boot to a
+          # connection error and the build log would show nothing wrong.
           skip_checkout: true
 
           # enabled by default, disable if your image is small and you want faster builds
