@@ -105,10 +105,20 @@ class TestGovernorIntel(Base):
         # A máquina podia estar em `ondemand`. Devolver `powersave` porque
         # `ondemand` não está no modelo deixaria a máquina diferente de
         # como a encontramos.
+        #
+        # O valor aplicado no meio é OBRIGATÓRIO neste teste. A versão
+        # anterior escrevia `ondemand` e restaurava para `ondemand`: a
+        # máquina já estava no destino, e uma restauração que não fizesse
+        # nada passaria igual. Teste de restauração só prova alguma coisa
+        # quando o valor de partida difere do que foi aplicado.
         eixo = axes.Governor(self.fs)
         for politica in self.fs.glob(axes.CPUFREQ):
             self.fs.write(politica / "scaling_governor", "ondemand")
-        eixo.restore("ondemand")
+        capturado = eixo.read()
+        eixo.apply("performance")
+        self.assertEqual(eixo.read(), "performance")
+
+        eixo.restore(capturado)
         self.assertEqual(eixo.read(), "ondemand")
 
 
