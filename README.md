@@ -276,7 +276,7 @@ instead of treating them alike.
 | `governor` | writes `scaling_governor` on every policy | **yes** — written, read back, compared |
 | `gpuLevel` | writes `power_dpm_force_performance_level` | the *setting* yes; the *effect* on clocks only indirectly |
 | `priority` | `nice` + `ionice` across the game's process tree | yes, by re-reading `/proc/PID/stat` |
-| `fpsLimit` | **nothing** | there is no kernel file for it |
+| `fpsLimit` | `gamescopectl debug_set_fps_limit` into the user's session | only if the convar reads back; discovered, not assumed |
 
 Each axis publishes one of six states, and each maps to a different thing the
 launcher should draw:
@@ -286,16 +286,69 @@ launcher should draw:
 build has nowhere to write; it will never work here) · `observed` (nothing was
 requested; the value is just what the machine has).
 
-**`fpsLimit` is not implemented and is not faked.** Frame limiting belongs to the
-compositor, and the daemon has no channel to it. The three paths that exist all
-go through gamescope and none go through here:
+**`fpsLimit` goes through the compositor, and the daemon crosses into the user's
+session to reach it.** There is still no kernel file for frame limiting;
+`gamescopectl` talks to gamescope at runtime over the `gamescope_control`
+protocol, and `debug_set_fps_limit 30` / `... 0` was confirmed on hardware
+without relaunching the session.
 
-1. `--framerate-limit` on the gamescope command line — the launcher controls the
-   launch, so this is the cheapest one;
-2. the limiter file gamescope watches at runtime, which is how SteamOS changes
-   the cap without a relaunch (needs verifying against the gamescope version
-   Bazzite ships);
-3. `MANGOHUD_CONFIG=fps_limit=N` in the launch environment.
+That `debug_` prefix is not decoration. The convar can be renamed or removed in a
+gamescope update, and Bazzite updates fast, so its presence is **detected before
+it is depended on** — three empirical layers, each degrading with its reason
+written into the axis:
+
+1. `/usr/bin/gamescopectl` exists → otherwise `unsupported`.
+2. A graphical session was found → otherwise `unavailable`, *not* `unsupported`.
+   The axis works; the precondition is missing right now. The daemon comes up on
+   `multi-user.target` and the session only exists after login.
+3. `gamescopectl help` lists `debug_set_fps_limit` → otherwise `unsupported`,
+   with the log recording what `help` *did* list, so the new name is one journal
+   line away.
+
+Crossing into the session is the interesting part, and the reasoning is in
+`session.py`. Three decisions worth repeating here:
+
+**The axis stays in the daemon.** An unprivileged helper inside the session would
+be cleaner — session process doing session things — but **whoever applies is
+whoever reports**. `state.json` is written by the daemon, and an applier on the
+other side would need a write channel back: the Unix socket the architecture
+deferred. Without it, the axis would publish unknown state forever, and both the
+profile editor and screen 17 consume per-axis state. Restore is triggered by the
+game exiting, which only the daemon sees.
+
+**The session is discovered, never assumed.** No fixed uid, no `id -nu 1000`. The
+daemon already walks `/proc`; it finds a process that is *inside* the session and
+takes uid, gid, `XDG_RUNTIME_DIR` and the display name from that one process, so
+they cannot disagree. The marker is `GAMESCOPE_WAYLAND_DISPLAY`, which
+gamescope-session-plus sets once gamescope reports its socket and which
+everything it starts inherits — the launcher's Chromium among them.
+
+**Privilege drops before the call.** `subprocess(user=, group=, extra_groups=[])`:
+stdlib, `setuid`/`setgid` between fork and exec, no sudo, no PAM, no shell. Root
+*could* open the socket — Wayland authenticates nothing beyond file permissions —
+but a root Wayland client leaves root-owned files in someone else's runtime
+directory, and inverting privilege into a user session is worth avoiding even
+where it works. `extra_groups=[]` because otherwise the child keeps root's
+supplementary groups after dropping uid. Every call carries a 2s timeout: a
+Wayland client waiting on a compositor that went away is a client that blocks,
+and a blocked publish loop is a frozen `at`, which the launcher correctly reads
+as stalled telemetry.
+
+**Restore is assumed, not captured — until the getter proves otherwise.** This is
+the one place this axis is weaker than `governor`, and the difference deserves
+saying out loud. The governor reads the previous value out of sysfs before
+writing, so it puts back exactly what it found. This axis captures only if
+`gamescopectl debug_set_fps_limit` with no argument prints the current value —
+plausible, since gamescope's convar system is Source-descended, and detected at
+probe time rather than assumed. Without it, restore writes `0`.
+
+And `0` is a **guess**. The session does start unlimited, but that does not make
+the daemon the only writer: `gamescopectl` is public, and any process in the
+session — or anyone over SSH — can have set a limit first. Restoring to zero
+erases whatever that other hand did. It is still what happens, for one reason:
+removing a limit never wedges a console, and being stuck at 30 fps after closing
+a game is the same class of failure as a governor stuck on `performance`. The
+safe direction is the loose one, and the axis note says the value is assumed.
 
 **`priority: tempo real` is deliberately not offered.** `SCHED_FIFO` on a game
 process can wedge the console, and there is no cgroup-level protection in this
@@ -376,11 +429,34 @@ profile at its highest reachable score, then set `wattsIdle` to the first,
 Note the divisor is the score you can actually reach, not 8 — see the next
 section.
 
+### What else the compositor exposes
+
+Found while chasing the frame limiter, recorded because it is cheap to write down
+and expensive to rediscover. **None of it is implemented** — it is raw material
+for the video settings screen in Etapa 7a, and the names below are where to look.
+
+`xprop -root` on the gamescope display carries:
+
+| Property | On the test machine | What it is for |
+| --- | --- | --- |
+| `GAMESCOPE_DISPLAY_MODE_LIST_EXTERNAL` | `1920x1080@144/165/120/60` | every mode the monitor accepts — the list a resolution/refresh picker has to be built from, rather than guessed |
+| `GAMESCOPE_VRR_CAPABLE` | `1` | variable refresh is supported |
+| `GAMESCOPE_VRR_ENABLED` | `0` | …and is off. A real control with a real toggle behind it |
+
+`gamescopectl help` also lists `drm_allow_dynamic_modes_for_external_display`,
+which suggests mode changes without a session relaunch — the same shape as the
+frame limiter, and therefore the same three-layer detection would apply.
+
+Two cautions carried over from the frame limiter. These are convars and X
+properties, not a stable API: anything built on them needs the presence detected
+before it is depended on. And every one of them lives inside the user's session,
+so any daemon-side use pays the same crossing that `session.py` already pays.
+
 ### What this pushed back to kyber-shell
 
-Four things this work surfaced that the launcher had to answer. Two are
-answered, in kyber-shell v0.6.0. Two are still open, and the reason each is
-still open is worth as much as the finding.
+Four things this work surfaced that the launcher had to answer. Three are
+answered — two in kyber-shell v0.6.0, one by the frame limiter landing on this
+side. One is still open, and it is the one that already caused damage.
 
 **1. `schedutil` was a dead control. ANSWERED.** With `intel_pstate` in active
 mode — the default on the test machine — `scaling_available_governors` offers
@@ -396,19 +472,22 @@ option row is a flex, and dropping an item would change the screen's shape
 between machines, and `schedutil` existing but being unavailable is worth
 teaching.
 
-**2. The gauge still cannot reach AGRESSIVO. OPEN, DELIBERATELY.** The score
-model gives `fpsLimit` up to 2 points and `priority` up to 2, but `fpsLimit` is
-never applied and `tempo real` is never offered. The best reachable score is
-2 + 2 + 0 + 1 = **5 of 8** → `nominal`, at 57 W. `hot` needs 6. The top third of
-the ruler — the signature element of the whole interface — is unreachable by
-construction.
+**2. The gauge could not reach AGRESSIVO. ANSWERED — by the limitation ending,
+not by moving the scale.** The score model gives `fpsLimit` up to 2 points and
+`priority` up to 2. With `fpsLimit` unapplied and `tempo real` never offered, the
+best reachable score was 2 + 2 + 0 + 1 = **5 of 8** → `nominal`, at 57 W, while
+`hot` needs 6. The top third of the ruler — the signature element of the whole
+interface — was unreachable by construction.
 
-It stays that way on purpose. Normalising the scale against what the machine can
-do today would be optimising against a temporary limitation: `fpsLimit` has three
-named paths to being implemented, all through gamescope, and the day one lands
-the scale would have to move back. A rescaled ruler is also a ruler whose numbers
-mean something different on every machine. The unreachable third is the honest
-reading until frame limiting works or is abandoned.
+With `fpsLimit` applying through `gamescopectl`, the ceiling is 2 + 2 + 2 + 1 =
+**7 of 8**, and the factory profile alone scores 6. AGRESSIVO is reachable.
+
+Nothing about the scale changed, and that was the point of leaving it alone.
+Normalising against what the machine could do in August would have been
+optimising against a limitation that turned out to last three weeks — and the
+rescaled ruler would now have to be un-rescaled, with every stored profile's
+meaning shifting underneath it. `tests/test_score.py` still pins the same nine
+watt values; the model was never touched.
 
 **3. Two sources of truth for the score model. OPEN, AND IT ALREADY BIT.** The
 model lives in `gameprofiled/score.py` and in kyber-shell's `src/data/mock.js`:
@@ -504,6 +583,11 @@ podman run --rm ghcr.io/landlandeiro/kyber:latest bash -c '
   ls /usr/lib/systemd/system/kyber-gameprofiled.service
   ls /usr/share/kyber/profiles.default.json
   readlink /usr/share/kyber/launcher/state.json   # /run/kyber/state.json
+
+  # The frame limiter goes through the compositor, so this is what the
+  # fpsLimit axis needs to exist before it can be anything but unsupported.
+  command -v gamescopectl
+  ls /usr/share/user-tmpfiles.d/kyber-gamescope.conf
 '
 ```
 
@@ -600,6 +684,38 @@ and the network tab shows **no requests to fonts.googleapis.com**. Loading the
 same directory as a `file://` URL is the useful negative test — it should fail
 with CORS errors in the console, which is exactly why the server exists.
 
+### The gamescope runtime leftovers
+
+`gamescope-session-plus` creates a directory per session with `mktemp -d` under
+`/run/user/<uid>` and does not remove it on exit — six `gamescope.XXXXXXX`
+directories after a day of testing. It is tmpfs and it is small, but a console
+that powers on and off daily leaks one per login.
+
+The leak is upstream's; the cleanup is ours, in
+`/usr/share/user-tmpfiles.d/kyber-gamescope.conf`. It runs at the start of each
+user session, before gamescope comes up, so it sweeps the previous sessions'
+leftovers without touching the one starting.
+
+Not a `trap` in our `sessions.d/kyber`: that file is `source`d into upstream's
+shell under `set -a`, so an EXIT trap there would either clobber theirs or need
+chaining through `trap -p` — and it would fail silently, which is the worst way
+for a cleanup to fail.
+
+> [!NOTE]
+> **Unverified on hardware.** The rule carries `!`, restricting it to the
+> instance's boot. That is a deliberate choice between two ways of failing:
+> without it, a `systemd-tmpfiles --user --create --remove` fired mid-session
+> would delete the *live* session's directory and take gamescope down with it.
+> With it, the worst case is the line never running and the leak continuing. But
+> if the user instance of `systemd-tmpfiles-setup` does not pass `--boot`, the
+> line is skipped in silence. To check:
+>
+> ```bash
+> ls -d /run/user/$UID/gamescope.*        # before and after a re-login
+> systemctl --user cat systemd-tmpfiles-setup.service | grep ExecStart
+> systemd-tmpfiles --user --boot --remove --dry-run 2>&1 | grep gamescope
+> ```
+
 ### On the console
 
 ```bash
@@ -626,6 +742,10 @@ for i in 1 2 3; do curl -s http://127.0.0.1:8787/state.json \
 
 # The session entry the display manager reads
 ls /usr/share/wayland-sessions/
+
+# What the frame limiter axis resolved to, and why. Three layers: binary,
+# session, convar — the log line names the one that failed.
+journalctl -u kyber-gameprofiled -b | grep -E 'sessão|fpsLimit'
 
 # The session's own log — gamescope-session-plus runs under `set -x`,
 # so this is verbose on purpose
