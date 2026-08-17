@@ -16,6 +16,39 @@ KYBER_URL="http://127.0.0.1:8787/"
 # chromium. Resolver os dois evita uma sessão que morre por PATH.
 KYBER_BROWSER="$(command -v chromium || command -v chromium-browser)"
 
+# O default do gamescope-session-plus termina em `--steam`, hardcoded e sem
+# variável que o desligue (gamescope-session-plus:266). Com essa flag o
+# gamescope só compõe janelas que carregam a propriedade STEAM_GAME — o KYBER
+# não é a Steam, e o resultado era tela preta com a sessão viva por trás.
+#
+# Definir GAMESCOPECMD aqui não é patch: o script só monta o default quando a
+# variável chega vazia (linha 165), então este é o ponto de extensão previsto.
+# O `-R`/`-T` do socket de controle é anexado depois, fora daquele bloco
+# (linha 270), de modo que nada da conversa com o gamescope se perde.
+#
+# Resolução fica de fora deliberadamente: o launcher se adapta por
+# transform: scale(). Só respeitamos SCREEN_WIDTH/HEIGHT quando o device-quirks
+# do próprio Bazzite os definiu para este hardware (sourced na linha 117, antes
+# deste arquivo), para não quebrar handhelds que dependem deles.
+: "${OUTPUT_CONNECTOR:=*,eDP-1}"
+: "${XWAYLAND_COUNT:=2}"
+: "${TOUCH_MODE:=4}"
+: "${HIDE_CURSOR_DELAY_MS:=3000}"
+: "${FADE_OUT_DURATION_MS:=200}"
+
+KYBER_RESOLUTION=""
+if [ -n "${SCREEN_WIDTH}" ] && [ -n "${SCREEN_HEIGHT}" ]; then
+    KYBER_RESOLUTION="-W ${SCREEN_WIDTH} -H ${SCREEN_HEIGHT}"
+fi
+
+GAMESCOPECMD="$(get_gamescope_binary) \
+${KYBER_RESOLUTION} \
+--prefer-output ${OUTPUT_CONNECTOR} \
+--xwayland-count ${XWAYLAND_COUNT} \
+--default-touch-mode ${TOUCH_MODE} \
+--hide-cursor-delay ${HIDE_CURSOR_DELAY_MS} \
+--fade-out-duration ${FADE_OUT_DURATION_MS}"
+
 short_session_recover() {
     # A sessão morreu rápido demais — provavelmente o navegador não subiu.
     # Cair no desktop é melhor que entrar em laço de boot: um console que não
