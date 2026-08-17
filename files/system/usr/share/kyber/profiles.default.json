@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Semente do /var/lib/kyber/profiles.json. O gameprofiled copia este",
+    "arquivo na primeira execucao e nunca mais o le — editar aqui muda o",
+    "padrao de fabrica; editar la muda a maquina.",
+    "",
+    "curve: 22 W de repouso e 7 W por ponto de escore sao chute do",
+    "prototipo, e calibrated:false diz isso em voz alta. Medir o console",
+    "com um wattimetro na parede, em repouso e com escore maximo, da os",
+    "dois numeros de verdade — so entao vire calibrated para true.",
+    "",
+    "gpuLevel auto e nao alto de proposito: no 5700G a CPU e a GPU dividem",
+    "envelope termico e o gabinete e fechado com chamine passiva. Forcar",
+    "high e o tipo de default que so aparece tres horas depois de ligado.",
+    "",
+    "games: perfil por AppID, cobrindo o que o default nao disser. Fica",
+    "vazio ate o editor de perfil do launcher poder gravar."
+  ],
+  "curve": {
+    "wattsIdle": 22,
+    "wattsPerPoint": 7,
+    "calibrated": false
+  },
+  "default": {
+    "governor": "performance",
+    "gpuLevel": "auto",
+    "fpsLimit": "sem limite",
+    "priority": "alta"
+  },
+  "games": {}
+}

@@ -1,0 +1,79 @@
+[Unit]
+Description=KYBER gameprofiled — estado da máquina e perfil de performance
+Documentation=https://github.com/LandLandeiro/kyber-os
+After=local-fs.target
+
+# Nenhuma ordenação forte com o kyber-launcher.service, de propósito. Se o
+# daemon ainda não publicou, o symlink não resolve, o darkhttpd responde
+# 404, e o launcher desenha SEM LEITURA — que é a verdade. Amarrar as duas
+# units só trocaria uma verdade momentânea por um boot mais lento.
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -P -m gameprofiled
+Environment=PYTHONPATH=/usr/lib/kyber
+# stdout e stderr do daemon vão direto para o journal. A descoberta de
+# sensores é impressa uma vez no start: é o registro de o que existe nesta
+# máquina, e é a primeira coisa a ler quando o header mostra um traço.
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=2
+
+# /run/kyber com +x para o diretório e +r para o arquivo: quem lê é o
+# darkhttpd, que roda como nobody. O systemd apaga o diretório quando a
+# unit para, e é isso que faz o launcher dizer SEM LEITURA em vez de
+# LEITURA PARADA quando o daemon não está no ar.
+RuntimeDirectory=kyber
+RuntimeDirectoryMode=0755
+
+# /var/lib/kyber guarda profiles.json, que sobrevive a atualização de
+# imagem — a imagem é read-only e o perfil é estado da máquina.
+StateDirectory=kyber
+StateDirectoryMode=0755
+
+# ---------------------------------------------------------------------
+# Endurecimento.
+#
+# O daemon roda como root porque escreve em /sys: não há como aplicar
+# governor de CPU sem isso. Então o resto do orçamento de confinamento
+# importa mais, não menos.
+#
+# ProtectKernelTunables NÃO pode ser ligado, e é o ponto: ele monta /sys
+# somente-leitura, que é exatamente o que este daemon precisa escrever.
+# Declarar a proteção e depois não conseguir aplicar perfil nenhum seria
+# pior que não declarar — uma unit que parece endurecida e um eixo que
+# falha em silêncio.
+#
+# ProtectProc fica no padrão porque a detecção de jogo varre /proc. E
+# ProcSubset=pid quebraria a leitura de /proc/stat, de onde sai o btime.
+# ---------------------------------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+# ReadWritePaths depois de ProtectSystem=strict: só estes dois nós de
+# sysfs são escritos, e ambos por releitura conferida. O nó de DPM da GPU
+# fica sob /sys/devices e é alcançado pelo symlink em /sys/class/drm.
+ReadWritePaths=/sys/devices/system/cpu
+ReadWritePaths=-/sys/devices
+
+# CAP_SYS_NICE para baixar o nice de processo alheio; CAP_SYS_PTRACE para
+# o fallback de detecção que lê /proc/PID/environ de processo de outro
+# usuário — o detector primário, pelo cgroup, não precisa dele.
+CapabilityBoundingSet=CAP_SYS_NICE CAP_SYS_PTRACE CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+
+[Install]
+WantedBy=multi-user.target

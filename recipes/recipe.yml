@@ -25,6 +25,13 @@ modules:
       - source: system
         destination: / # copies files/system/* (* means everything inside it) into your image's root folder /
 
+  # Depois do módulo `files`, que é quem deposita o launcher e o pacote do
+  # gameprofiled na árvore. O symlink que este script cria mora dentro do
+  # diretório do launcher, e o launcher só existe a partir dali.
+  - type: script
+    scripts:
+      - kyber-gameprofiled.sh
+
   - type: dnf
     install:
       packages:
@@ -37,9 +44,19 @@ modules:
         # screen stays blank. 63 KB installed.
         - darkhttpd
 
+  # gameprofiled has no package of its own: it is stdlib-only Python, laid
+  # into /usr/lib/kyber/ by the `files` module above. Nothing to install —
+  # python3 already ships in the base image, and the script module above
+  # fails the build if that ever stops being true.
+
   - type: systemd
     system:
       enabled:
         - kyber-launcher.service
+        # Publica /run/kyber/state.json, que o launcher lê pelo symlink
+        # servido pelo darkhttpd. Sem ele a interface sobe inteira e
+        # desenha SEM LEITURA — o launcher não depende do daemon para
+        # abrir, e é assim que tem que ser.
+        - kyber-gameprofiled.service
 
   - type: signing # this sets up the proper policy & signing files for signed images to work fully
