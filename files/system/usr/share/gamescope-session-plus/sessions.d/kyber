@@ -26,6 +26,15 @@ short_session_recover() {
 }
 
 post_gamescope_start() {
+    # O gamescope-session-plus publica o display do gamescope apenas como
+    # GAMESCOPE_WAYLAND_DISPLAY (gamescope-session-plus:301) e nunca exporta
+    # WAYLAND_DISPLAY. Cliente Wayland que procure o nome padrão não acha nada,
+    # morre com "Failed to connect to Wayland display" e derruba a sessão de
+    # volta para o login. Só dá para fazer isso aqui: no corpo do arquivo a
+    # variável ainda não existe, porque o gamescope só reporta seu display pelo
+    # socket depois de subir, e este gancho roda logo em seguida (linha 312).
+    export WAYLAND_DISPLAY="${GAMESCOPE_WAYLAND_DISPLAY}"
+
     # Espera o kyber-launcher.service responder antes de abrir o navegador.
     # Sem isto, a primeira tela do console pode ser um erro de conexão do
     # Chromium — que é exatamente a impressão que não queremos causar no boot.
