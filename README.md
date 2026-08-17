@@ -126,11 +126,10 @@ the performance profile of whatever is running, and publishes both to
 `/usr/lib/kyber/gameprofiled/`, with no package of its own and no dependency to
 install.
 
-**It exposes no HTTP and accepts no commands.** Joining "takes input from
-outside" with "runs as root" is hard to undo later, so the daemon only writes.
-When the profile editor needs to save, the planned path is a Unix socket with a
-closed command list plus an unprivileged `kyber-api`; the JSON stays the read
-channel either way.
+**It exposes no HTTP.** Joining "takes input from outside" with "runs as root"
+is hard to undo later, so writes arrive over a Unix socket carrying a closed
+list of two verbs. The JSON files stay the read channel. See
+[Writing a profile](#writing-a-profile).
 
 ### How the launcher reaches it
 
@@ -609,6 +608,143 @@ removes the conditional request from the reader's side, so there is no 304 to
 serve a cached body behind. Both ends now, on a failure that otherwise shows up
 as a healthy console reporting stalled telemetry.
 
+## Writing a profile
+
+The profile editor has to actually apply, and the daemon runs as root. Those two
+facts are what the whole shape below exists to reconcile.
+
+```
+something unprivileged  --Unix socket-->  gameprofiled (root)
+gameprofiled            --writes-->  /var/lib/kyber/profiles.json
+gameprofiled            --polls, next tick-->  applies
+```
+
+The "something unprivileged" is `kyber-api`, and it arrives in its own commit.
+This one stops at the socket, which is testable on its own with three lines of
+Python and no browser in the middle.
+
+The daemon gains no HTTP port. It gains a Unix socket carrying a **closed list
+of two verbs**, and the list being closed is the security property — not an
+implementation detail that can be loosened later because it got tight.
+
+| Verb | Payload | Why it exists |
+| --- | --- | --- |
+| `set-profile` | `appid`, `axes` | The SAVE button. Without it there is no Etapa 5. |
+| `clear-profile` | `appid` | RESTORE DEFAULT, with a meaning that survives. |
+
+The second one is not strictly needed to make the editor work — X only resets
+the local copy, and what follows is a `set-profile` carrying the default's
+values. It exists so the label does not lie. Writing "today's default" into the
+title's entry pins it to a snapshot: the next image update changes the default
+and that title silently stops following it. It is also the only way the file
+ever shrinks.
+
+**Two verbs, not one verb with a sentinel.** `set-profile` with `axes: {}` would
+do the same work. In a closed list the value is in each entry meaning exactly one
+thing; a parser with a special case is where a closed list starts to leak.
+
+There is **no read verb**. That is also a property: a protocol that cannot read
+cannot leak, and "the JSON is the read channel" stays true. What is stored is
+served at `/profiles.json`; what is applied is served at `/state.json`.
+
+What is deliberately *not* there, each with its reason:
+
+| Not a verb | Why not |
+| --- | --- |
+| `apply-now` | It would be the second path. The socket writes the **file**; the daemon notices by mtime, exactly as it notices `vi`. |
+| `set-curve` | The watt curve is calibrated with a wall meter, once in the console's life. A verb that changes the meaning of every published watt, for a one-off, is surface without demand. |
+| `set-default` | No screen edits the console-wide profile; screen 04 is per title. It arrives when the screen does. |
+| anything writing sysfs directly | The parallel path under another name. |
+
+### The message, and the answer
+
+One JSON object per connection, newline-terminated, 4 KiB ceiling, one command
+per connection.
+
+```jsonc
+{"v": 1, "cmd": "set-profile", "appid": 553850,
+ "axes": {"governor": "performance", "gpuLevel": "auto",
+          "fpsLimit": "60", "priority": "alta"}}
+```
+
+A refusal carries a machine-readable code and a human-readable note, the same
+discipline as `sources` in `state.json`:
+
+```jsonc
+{"v": 1, "ok": false, "error": "eixo_indisponivel", "axis": "governor",
+ "value": "schedutil", "available": ["powersave", "performance"],
+ "note": "esta máquina não aplica 'schedutil' em governor; aplica ..."}
+```
+
+The codes are a closed set: `mensagem_invalida`, `versao_desconhecida`,
+`comando_desconhecido`, `appid_invalido`, `eixo_desconhecido`,
+`valor_fora_do_vocabulario`, `eixo_indisponivel`, `limite_de_titulos`,
+`escrita_falhou`.
+
+A success says **written**, not **applied** — they are different claims. What
+was applied shows up in `state.json` on the next tick, per axis, with
+`requested`, `current`, `state` and a note. The same distinction the axes have
+always published, now reaching the socket's reply.
+
+### Validation is on the root side
+
+The daemon validates as if every message were hostile, and it keeps doing so no
+matter how the socket's permissions end up: whatever speaks HTTP on the other
+side takes input from a network port, and that is the piece that can be
+compromised.
+
+It is worth saying what the socket's mode does *not* buy. Once it is
+`0660 root:<group>`, the set of things that can open it is that group and root —
+*not* "anything in the session". The opposite belief, left standing for six
+months, becomes the argument for making the socket `0666`.
+
+- `appid` is an **integer**, 1 to 2³¹−1. Not a string, not a float, not a boolean
+  (which is an `int` in Python and would slip through), and never a file path.
+  The file path is a constant of the daemon; no field of any message influences
+  any path.
+- The axis vocabulary is `score`'s — the same one `config` already uses to filter
+  the file. A second list here would be the project's third source of truth, and
+  the second one already cost a `NaN` on the gauge.
+- An unknown key in `axes` is **refused**, not dropped. Dropping in silence is
+  how a client comes to believe it saved what it did not.
+- At most 1024 titles. Not a product limit: it is what stops a `set-profile` loop
+  from filling `/var`, which on a read-only-image console is the only writable
+  place there is.
+
+### `available` is authority, but only when it has something to say
+
+Asking for `schedutil` on a machine running `intel_pstate` in active mode is
+refused, with the reason and the list of what does exist. The editor already
+strikes the unavailable option, but an interface is not a boundary: its reading
+is taken once at mount, and the machine can have changed since.
+
+**An empty `available` does not refuse.** Empty means two very different things —
+"this build will never do it" and "a precondition is missing *right now*", like
+the frame limiter before the graphical session comes up — and refusing a save
+because a probe failed for two seconds would turn transient state into lost work.
+
+More than that: the launcher already draws that case. In a group where nothing is
+applicable the LED leaves every option and the stored value comes back as a word
+in the group header — "perfil pede 60". That drawing exists to show that the
+profile holds a value nobody applies. Refusing the write would erase exactly what
+it was built to show.
+
+So: non-empty list and a value outside it → refused. Empty list → accepted, with
+a **warning** in the reply. The file stays a portable artifact, which is what
+lets the disk move to another machine and the axis start working there.
+
+### The socket must never freeze `at`
+
+A client holding the publish loop past the next instant makes `at` repeat, and a
+repeated `at` is what the launcher reports as stalled telemetry. The daemon would
+play dead by answering the phone.
+
+So the loop `select`s on the socket instead of sleeping, and never yields the
+publish instant: 100 ms for a client to deliver a complete message over a local
+socket, at most 8 conversations per round, and the wait is sliced at 250 ms
+because Python resumes `select` after a signal rather than returning from it
+(PEP 475) — an unsliced wait would hold SIGTERM until the next publish.
+
 ## Installation
 
 > [!WARNING]
@@ -852,6 +988,60 @@ journalctl -u kyber-gameprofiled -b | grep -E 'sessão|fpsLimit'
 # so this is verbose on purpose
 journalctl --user -b | grep -i gamescope
 ```
+
+### Writing a profile, layer by layer
+
+Each layer proves itself without the one above it. Work up from the bottom: the
+layer that answers tells you where the failure is.
+
+**Layer 1 — the stored profile is served.** No socket, no API, no launcher: this
+is a symlink and a static file.
+
+```bash
+curl -s http://127.0.0.1:8787/profiles.json | python3 -m json.tool
+```
+
+A 404 means the symlink is missing or the file was never seeded — check
+`readlink /usr/share/kyber/launcher/profiles.json` and
+`ls -l /var/lib/kyber/profiles.json`, which must be `0644`. This is what the
+profile editor reads to open showing what was saved, and it keeps answering with
+`kyber-api` dead.
+
+**Layer 2 — the socket takes commands.** No browser in the middle. The socket is
+`0660 root:kyber-api`, so this needs `sudo`; running it without `sudo` and
+getting `Permission denied` is how you confirm the permission is real.
+
+```bash
+kyber-cmd() {
+  sudo python3 -c '
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect("/run/kyber/control.sock")
+s.sendall(sys.argv[1].encode() + b"\n"); print(s.recv(4096).decode().strip())
+' "$1"
+}
+
+# Accepted — writes the file. Nothing else happens yet.
+kyber-cmd '{"v":1,"cmd":"set-profile","appid":553850,
+            "axes":{"governor":"powersave","gpuLevel":"baixo"}}'
+
+# Refused, with the reason and the list of what this machine does offer.
+kyber-cmd '{"v":1,"cmd":"set-profile","appid":553850,
+            "axes":{"governor":"schedutil"}}'
+
+# Removes the entry; the title goes back to following the default.
+kyber-cmd '{"v":1,"cmd":"clear-profile","appid":553850}'
+```
+
+With the title running, the sysfs write lands on the **next** tick, not on the
+reply — the reply says written, the journal says applied:
+
+```bash
+journalctl -u kyber-gameprofiled -f | grep -E 'socket|config|perfil'
+cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+```
+
+`nc -U` works too if it is installed, but `python3` is guaranteed here — the
+daemon is written in it.
 
 The screen is the other half of the check, and it is faster: the header's CPU
 and GPU readings should move on their own, and stopping the daemon

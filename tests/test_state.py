@@ -147,7 +147,10 @@ class DaemonBase(unittest.TestCase):
     runner = None
 
     def daemon(self, *extra):
-        opcoes = parse_args(["--root", str(self.raiz), *extra])
+        # `--no-socket` por padrão: abrir um socket de verdade é efeito
+        # colateral que nenhum destes testes pediu, e o transporte tem
+        # suíte própria em test_control.py.
+        opcoes = parse_args(["--root", str(self.raiz), "--no-socket", *extra])
         d = Daemon(opcoes, self.log.append, self.relogio, self.relogio,
                    runner=self.runner)
         d.manager.ops = OpsFalso(self.raiz)

@@ -15,7 +15,8 @@ import sys
 import threading
 import time
 
-from . import VERSION, games, sensors, session as sessao_mod, state
+from . import (VERSION, control, games, sensors,
+               session as sessao_mod, state)
 from .config import Config
 from .fs import Fs
 from .profile import ProfileManager
@@ -78,6 +79,13 @@ COMPARACAO_S = 600
 # só, do /proc do processo que a revelou.
 BUSCA_SESSAO_S = 15
 
+# Fatia da espera entre publicações quando há socket. O `select` do Python
+# é RETOMADO depois de um sinal em vez de devolver (PEP 475), então uma
+# espera inteira num select seguraria o SIGTERM até a próxima publicação.
+# Fatiar custa quatro despertares por segundo e devolve a parada rápida
+# que o `Event.wait` dava de graça.
+FATIA_ESPERA_S = 0.25
+
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(prog="gameprofiled", description=__doc__)
@@ -91,6 +99,10 @@ def parse_args(argv=None):
     p.add_argument("--no-apply", action="store_true",
                    help="observa e publica sem escrever em sysfs; para a "
                         "primeira execução numa máquina nova")
+    p.add_argument("--socket", default=control.CAMINHO,
+                   help="socket de comando; passa pela raiz do --root")
+    p.add_argument("--no-socket", action="store_true",
+                   help="não escuta comando nenhum")
     return p.parse_args(argv)
 
 
@@ -164,6 +176,27 @@ class Daemon:
             log=self.log, apply_enabled=not opcoes.no_apply,
             compositor=self.compositor)
         self._log_eixos()
+
+        # O socket só existe depois do manager, porque a autoridade sobre
+        # o que a máquina aceita é o eixo VIVO — e ele troca quando o card
+        # rebinda ou a sessão aparece.
+        #
+        # `--once` não escuta: ele existe para se OLHAR uma publicação, e
+        # abrir porta de comando para isso seria efeito colateral de um
+        # comando de inspeção.
+        #
+        # Com raiz simulada o socket NASCE DENTRO da árvore falsa, porque
+        # `self.opcoes.socket` passa pelo fs.path() como todo o resto. É o
+        # que garante que um teste não acabe falando com o daemon real da
+        # máquina de quem está inspecionando — a mesma proteção que o
+        # --root já dá ao sysfs.
+        self.control = None
+        if not (opcoes.no_socket or opcoes.once):
+            servidor = control.Servidor(
+                self.fs, self.config,
+                lambda eixo: self.manager.axes[eixo].available(),
+                caminho=opcoes.socket, log=self.log)
+            self.control = servidor if servidor.abrir() else None
 
     # ------------------------------------------------------------------
     def discover(self):
@@ -343,17 +376,36 @@ class Daemon:
         self.talvez_redescobrir()
         return documento
 
+    def esperar(self, alvo, parar):
+        """Espera até o instante da publicação. True se mandaram parar.
+
+        Sem socket é o `Event.wait` de sempre, que acorda no sinal. Com
+        socket a espera vira atendimento — e o atendimento nunca passa do
+        `alvo`. A publicação tem prioridade sobre o comando por uma razão
+        que já mordeu este projeto por outro caminho: `at` que não avança
+        é o que o launcher chama de LEITURA PARADA, e um daemon que
+        atrasasse a publicação para atender alguém se faria de morto."""
+        if self.control is None:
+            return parar.wait(max(0.0, alvo - self.relogio()))
+        while not parar.is_set():
+            restante = alvo - self.relogio()
+            if restante <= 0:
+                return False
+            self.control.atender(min(restante, FATIA_ESPERA_S))
+        return True
+
     def run(self, parar=None):
         parar = parar or threading.Event()
         while not parar.is_set():
-            espera = state.next_publish(self.relogio()) - self.relogio()
-            if parar.wait(max(0.0, espera)):
+            if self.esperar(state.next_publish(self.relogio()), parar):
                 break
             self.tick()
             if self.opcoes.once:
                 break
 
     def shutdown(self):
+        if self.control is not None:
+            self.control.fechar()
         self.manager.shutdown()
 
         # --once existe para se OLHAR o resultado; apagar o arquivo logo
