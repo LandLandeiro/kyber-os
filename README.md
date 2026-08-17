@@ -302,8 +302,35 @@ written into the axis:
    The axis works; the precondition is missing right now. The daemon comes up on
    `multi-user.target` and the session only exists after login.
 3. `gamescopectl help` lists `debug_set_fps_limit` → otherwise `unsupported`,
-   with the log recording what `help` *did* list, so the new name is one journal
+   with the note recording what `help` *did* list, so a rename is one journal
    line away.
+
+Layer 3 has already failed once, through its own fault, and the episode is worth
+keeping. `gamescopectl help` writes its convar list to **stderr**; the probe read
+only stdout, so a convar that existed came back `unsupported`.
+
+The mechanism was right. Faced with a check that did not pass, it fell back to
+`unsupported` with the reason written down rather than applying anyway and
+becoming a silent no-op — which is the whole point of detecting before depending.
+A false negative costs a disabled feature and a log line; a false positive would
+cost a control in the editor that does nothing and nobody finds out. The layer
+read the wrong channel, not the wrong verdict.
+
+But the message was identical to the one a genuinely removed convar produces, so
+the note now carries a fingerprint of what was seen — how many lines `help`
+returned, and how many mention `fps`:
+
+| Note says | Means |
+| --- | --- |
+| `não respondeu` | nothing came back on either channel. The convar is not the problem; the reading is |
+| `N linhas, 0 citando fps` | the convar is gone |
+| `N linhas, M citando fps` | it was renamed, and the candidates are quoted in the note |
+
+Every call now reads both channels, and the readback parser is deliberately
+strict: it accepts a bare integer or `debug_set_fps_limit = N`, and nothing else.
+A wrong readback is worse than no readback, because it feeds the comparison in
+`apply()` — a number scraped out of an error message would become an invented
+`degraded`, or an `applied` by coincidence.
 
 Crossing into the session is the interesting part, and the reasoning is in
 `session.py`. Three decisions worth repeating here:

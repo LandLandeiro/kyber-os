@@ -393,9 +393,10 @@ class TestLimiteDeQuadros(DaemonBase):
         fakefs.sessao_steam(self.raiz)
         fakefs.sessao_gamescope(self.raiz)
         fakefs.gamescopectl(self.raiz)
+        # A forma REAL: help e valor em stderr, stdout vazio.
         self.runner = RunnerFalso({
-            "help": (0, fakefs.HELP_COM_CONVAR, ""),
-            "debug_set_fps_limit": (0, "0\n", ""),
+            "help": fakefs.RESPOSTA_HELP,
+            "debug_set_fps_limit": fakefs.RESPOSTA_GETTER,
         })
 
     def eixo(self):
@@ -455,7 +456,7 @@ class TestLimiteDeQuadros(DaemonBase):
 
     def test_convar_que_some_numa_atualizacao_volta_a_unsupported(self):
         # O prefixo `debug_` não é decoração.
-        self.runner = RunnerFalso({"help": (0, fakefs.HELP_SEM_CONVAR, "")})
+        self.runner = RunnerFalso({"help": fakefs.RESPOSTA_HELP_SEM})
         d = self.daemon()
         d.tick()
         eixo = self.eixo()

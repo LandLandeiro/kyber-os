@@ -271,3 +271,11 @@ HELP_SEM_CONVAR = """convars:
   debug_hdr_debug_force_output
   vblank_debug
 """
+
+# O `gamescopectl help` escreve a lista em STDERR, e stdout sai vazio.
+# Descoberto no hardware depois de a sondagem reprovar um convar que
+# existia. As respostas abaixo têm a forma real; os testes que usam a
+# forma em stdout existem para provar que os dois canais servem.
+RESPOSTA_HELP = (0, "", HELP_COM_CONVAR)
+RESPOSTA_HELP_SEM = (0, "", HELP_SEM_CONVAR)
+RESPOSTA_GETTER = (0, "", "debug_set_fps_limit = 0\n")

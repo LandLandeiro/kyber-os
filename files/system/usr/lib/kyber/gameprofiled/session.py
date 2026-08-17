@@ -166,6 +166,50 @@ DICA_EPERM = (
 )
 
 
+def _juntar(saida, erro):
+    """Os dois canais, sempre.
+
+    O `gamescopectl help` escreve a lista de convars em STDERR. Assumir
+    stdout custou um falso negativo no hardware: o convar existia e a
+    sondagem disse que não. Nenhuma leitura deste módulo pode escolher um
+    canal só — não há por que supor de qual lado uma ferramenta fala."""
+    return "\n".join(parte for parte in (saida, erro) if parte)
+
+
+def _impressao(texto):
+    """Quantas linhas o comando devolveu e quantas citam quadros.
+
+    É o que separa "o convar sumiu" de "estou lendo o lugar errado" na
+    próxima vez, porque as duas produzem a mesma frase."""
+    linhas = [l for l in texto.splitlines() if l.strip()]
+    citam = [l.strip() for l in linhas if "fps" in l.lower()]
+    resumo = f"saída com {len(linhas)} linhas, {len(citam)} citando fps"
+    return f"{resumo}: {'; '.join(citam[:2])[:80]}" if citam else resumo
+
+
+# Duas formas, e nada além delas. Qualquer outra saída vira None, e o eixo
+# fica sem releitura em vez de ganhar uma releitura inventada.
+_SO_NUMERO = re.compile(r"-?\d+")
+_NOMEADO = re.compile(rf"{re.escape(CONVAR)}\s*[=:]?\s*(-?\d+)\b")
+
+
+def _parse_limite(texto):
+    """Um inteiro, e só quando a saída é inequívoca.
+
+    Da última linha para a primeira: se a ferramenta imprimir cabeçalho, o
+    valor está no fim."""
+    for linha in reversed((texto or "").splitlines()):
+        linha = linha.strip()
+        if not linha:
+            continue
+        if _SO_NUMERO.fullmatch(linha):
+            return int(linha)
+        casa = _NOMEADO.match(linha)
+        if casa:
+            return int(casa.group(1))
+    return None
+
+
 class SubprocessRunner:
     """A única chamada que sai do processo. Isolada para o teste gravá-la
     em vez de executá-la — nada disto roda num Mac."""
@@ -231,8 +275,32 @@ class Compositor:
         A terceira é a que responde ao prefixo `debug_`: procura o NOME do
         convar na saída do `help`, não a existência do binário. Se uma
         atualização do gamescope renomear ou remover o comando, isto pega,
-        o eixo volta a `unsupported`, e o log guarda o que o `help` listou
-        — o nome novo fica a uma linha de journal de distância."""
+        o eixo volta a `unsupported`, e a nota guarda o que o `help`
+        listou — o nome novo fica a uma linha de journal de distância.
+
+        A CAMADA 3 JÁ REPROVOU UMA VEZ, E POR CULPA DELA MESMA. O
+        `gamescopectl help` escreve a lista em STDERR, e a sondagem lia só
+        stdout: o convar existia e a resposta foi `unsupported`. Vale
+        registrar o que isso mostrou, porque as duas leituras são
+        diferentes.
+
+        O MECANISMO ACERTOU. Diante de uma verificação que não passou, ele
+        voltou a `unsupported` com a razão escrita, em vez de aplicar
+        assim mesmo e virar no-op silencioso — que é exatamente o que a
+        defesa em camadas existe para impedir. Um falso negativo custa uma
+        funcionalidade desligada e uma linha de log; um falso positivo
+        custaria um botão no editor que não faz nada e ninguém descobre.
+        A camada errou o canal, não o julgamento.
+
+        MAS A MENSAGEM ERA A MESMA que a de um convar REALMENTE removido,
+        e quem ler o journal na próxima vez precisa distinguir os dois.
+        Por isso a nota carrega agora a impressão digital do que se viu:
+        quantas linhas o `help` devolveu e quantas citam `fps`.
+
+          0 linhas          não é o convar que sumiu, é a leitura que está
+                            errada — canal, ambiente ou binário
+          N linhas, 0 fps   o convar saiu de vez
+          N linhas, M fps   foi renomeado, e os candidatos vão no log"""
         if not self.fs.exists(self.binario):
             self.suporte, self.nota = "unsupported", f"{self.binario} não existe"
             self.getter = False
@@ -247,18 +315,35 @@ class Compositor:
             return self.suporte
 
         codigo, saida, erro = self._rodar("help")
-        if codigo != 0:
-            self.suporte = "unavailable"
-            self.nota = f"gamescopectl help falhou: {(erro or saida).strip()[:120]}"
-            self.getter = False
+        texto = _juntar(saida, erro)
+
+        # Conteúdo antes de código de saída: uma ferramenta que escreve
+        # `help` em stderr é uma ferramenta que pode muito bem sair com
+        # código diferente de zero num `help`. O que importa é se ESTA
+        # build conhece o convar, e isso está no texto.
+        if CONVAR in texto:
+            self.getter = self.get_limit() is not None
+            self.suporte = "ok"
+            self.nota = None if self.getter else (
+                "aplicado sem releitura: o gamescopectl não devolve o valor "
+                "corrente, então o sucesso é o código de saída do comando"
+            )
             return self.suporte
 
-        if CONVAR not in saida:
-            self.suporte = "unsupported"
-            self.nota = (f"gamescopectl responde mas não lista {CONVAR} — "
-                         "o convar mudou de nome ou saiu")
-            self.getter = False
+        self.getter = False
+
+        if codigo is None or not texto.strip():
+            # Não rodou, ou rodou e não disse nada. Não dá para acusar o
+            # convar de ter sumido sem ter visto a lista.
+            self.suporte = "unavailable"
+            motivo = (erro or saida).strip()[:120] or "sem saída em nenhum canal"
+            self.nota = f"gamescopectl help não respondeu: {motivo}"
             return self.suporte
+
+        self.suporte = "unsupported"
+        self.nota = (f"gamescopectl responde e não lista {CONVAR} "
+                     f"({_impressao(texto)}) — o convar mudou de nome ou saiu")
+        return self.suporte
 
         # Sistema de convar costuma imprimir o valor corrente quando
         # chamado pelado, e o do gamescope é de linhagem Source. Se
@@ -274,16 +359,30 @@ class Compositor:
 
     # ------------------------------------------------------------------
     def get_limit(self):
-        """Limite corrente em quadros, ou None quando não há como ler."""
-        codigo, saida, _ = self._rodar(CONVAR)
-        if codigo != 0:
+        """Limite corrente em quadros, ou None quando não há como ler.
+
+        Lê os dois canais, e o código de saída não desqualifica: quem
+        escreve `help` em stderr também pode escrever o valor lá, e pode
+        não zerar o código.
+
+        A leitura é ESTRITA de propósito — ver `_parse_limite`. Releitura
+        errada é pior que releitura nenhuma: ela alimenta a comparação do
+        `apply`, e um número pescado de uma mensagem de erro viraria
+        `degraded` inventado, ou pior, um `applied` por coincidência."""
+        codigo, saida, erro = self._rodar(CONVAR)
+        if codigo is None:
             return None
-        casa = re.search(r"-?\d+", saida or "")
-        return int(casa.group()) if casa else None
+        return _parse_limite(_juntar(saida, erro))
 
     def set_limit(self, quadros):
-        """None em caso de sucesso, ou a mensagem do erro."""
+        """None em caso de sucesso, ou a mensagem do erro.
+
+        Aqui o código de saída manda, e é o único sinal que há. O risco de
+        um `exit 0` que não aplicou nada está declarado na nota do eixo
+        quando não há getter — e é a camada 3 que o mantém pequeno: se o
+        `help` lista o convar, o setter existe."""
         codigo, saida, erro = self._rodar(CONVAR, str(int(quadros)))
         if codigo == 0:
             return None
-        return (erro or saida or "gamescopectl falhou sem dizer por quê").strip()[:160]
+        texto = _juntar(saida, erro).strip()
+        return (texto or "gamescopectl falhou sem dizer por quê")[:160]

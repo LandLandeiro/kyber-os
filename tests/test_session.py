@@ -276,3 +276,98 @@ class TestDicaDeEperm(unittest.TestCase):
         texto = session.descrever(erro)
         self.assertNotIn("CAP_SETUID", texto)
         self.assertIn("No such file", texto)
+
+
+class TestCanaisDeSaida(Base):
+    """O `gamescopectl help` escreve em STDERR.
+
+    A sondagem lia só stdout e reprovou um convar que existia. O regresso
+    é fácil de reintroduzir — em qualquer chamada nova que escolha um
+    canal — e caro de perceber, porque produz a mesma frase que um convar
+    de verdade removido.
+    """
+
+    def setUp(self):
+        super().setUp()
+        fakefs.sessao_gamescope(self.raiz)
+        fakefs.gamescopectl(self.raiz)
+        self.sessao = session.find_session(self.fs)
+
+    def compositor(self, respostas):
+        self.runner = RunnerFalso(respostas)
+        return session.Compositor(self.fs, self.sessao, self.runner)
+
+    # ---------- o bug ----------
+    def test_help_em_stderr_e_detectado(self):
+        c = self.compositor({"help": fakefs.RESPOSTA_HELP,
+                             "debug_set_fps_limit": fakefs.RESPOSTA_GETTER})
+        self.assertEqual(c.probe(), "ok")
+        self.assertTrue(c.getter)
+
+    def test_help_em_stdout_continua_detectado(self):
+        c = self.compositor({"help": (0, fakefs.HELP_COM_CONVAR, ""),
+                             "debug_set_fps_limit": (0, "0\n", "")})
+        self.assertEqual(c.probe(), "ok")
+
+    def test_help_dividido_entre_os_dois_canais(self):
+        c = self.compositor({"help": (0, "convars:\n", "  debug_set_fps_limit\n"),
+                             "debug_set_fps_limit": fakefs.RESPOSTA_GETTER})
+        self.assertEqual(c.probe(), "ok")
+
+    def test_conteudo_vence_codigo_de_saida(self):
+        # Ferramenta que escreve help em stderr é ferramenta que pode sair
+        # com código diferente de zero num help. O que importa é se ESTA
+        # build conhece o convar.
+        c = self.compositor({"help": (1, "", fakefs.HELP_COM_CONVAR),
+                             "debug_set_fps_limit": fakefs.RESPOSTA_GETTER})
+        self.assertEqual(c.probe(), "ok")
+
+    def test_getter_em_stderr_e_lido(self):
+        c = self.compositor({"help": fakefs.RESPOSTA_HELP,
+                             "debug_set_fps_limit": (0, "", "debug_set_fps_limit = 60\n")})
+        c.probe()
+        self.assertEqual(c.get_limit(), 60)
+
+    # ---------- distinguir os dois casos ----------
+    def test_sem_saida_nenhuma_e_unavailable_e_nao_unsupported(self):
+        # Não dá para acusar o convar de ter sumido sem ter visto a lista.
+        c = self.compositor({"help": (0, "", "")})
+        self.assertEqual(c.probe(), "unavailable")
+        self.assertIn("não respondeu", c.nota)
+
+    def test_a_nota_distingue_convar_removido_de_canal_errado(self):
+        c = self.compositor({"help": fakefs.RESPOSTA_HELP_SEM})
+        self.assertEqual(c.probe(), "unsupported")
+        # A impressão digital: quantas linhas vieram e quantas citam fps.
+        self.assertIn("3 linhas", c.nota)
+        self.assertIn("0 citando fps", c.nota)
+
+    def test_convar_renomeado_deixa_os_candidatos_na_nota(self):
+        renomeado = "convars:\n  set_fps_limit\n  vblank_debug\n"
+        c = self.compositor({"help": (0, "", renomeado)})
+        self.assertEqual(c.probe(), "unsupported")
+        self.assertIn("1 citando fps", c.nota)
+        # O nome novo fica escrito, para a correção ser de uma linha.
+        self.assertIn("set_fps_limit", c.nota)
+
+
+class TestLeituraEstrita(unittest.TestCase):
+    """Releitura errada é pior que releitura nenhuma: ela alimenta a
+    comparação do `apply`, e um número pescado de uma mensagem de erro
+    viraria `degraded` inventado — ou um `applied` por coincidência."""
+
+    def test_formas_aceitas(self):
+        for texto, esperado in [
+            ("0", 0),
+            ("30\n", 30),
+            ("debug_set_fps_limit = 0", 0),
+            ("debug_set_fps_limit: 60", 60),
+            ("debug_set_fps_limit 120 (default: 0)", 120),
+            ("cabeçalho\ndebug_set_fps_limit = 30", 30),
+        ]:
+            self.assertEqual(session._parse_limite(texto), esperado, texto)
+
+    def test_formas_recusadas(self):
+        for texto in ["unknown convar", "error code 2", "", None,
+                      "gamescope 3.17.1", "falhou: errno 13"]:
+            self.assertIsNone(session._parse_limite(texto), texto)
