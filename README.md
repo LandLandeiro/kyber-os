@@ -80,11 +80,35 @@ recreate exactly that.
 The version is pinned in one place — `KYBER_SHELL_REF` in
 `.github/workflows/build.yml`. To ship new launcher work:
 
-1. Tag the state you want in kyber-shell:
+1. Push the launcher's `main`, **then** tag it, then push the tag:
    ```bash
-   git -C ../kyber-shell tag -a v0.6.0 -m "SystemAdapter" && git -C ../kyber-shell push origin v0.6.0
+   git -C ../kyber-shell push origin main
+   git -C ../kyber-shell tag -a v0.7.0 -m "Editor de perfil grava de verdade"
+   git -C ../kyber-shell push origin v0.7.0
    ```
+   Or `git -C ../kyber-shell push origin main --follow-tags`, which does both in
+   that order in one command.
 2. Change `KYBER_SHELL_REF` to that tag and push.
+
+**The order in step 1 is not tidiness, and the trap has already been sprung.**
+A tag push carries the tagged commit and its ancestors and nothing else. So
+`git push origin v0.7.0` on its own is enough for the CI checkout to succeed
+while every commit made *after* that tag exists only on the machine it was
+written on.
+
+Nothing goes red. The build stages a launcher, finds `index.html`, finds
+`src/main.js`, counts the fonts, publishes a signed image, and prints a resolved
+commit that is perfectly real. The console boots into a launcher that is not the
+one on the machine that built it, and no line anywhere says so.
+
+It is the same failure the vendored copy of the launcher used to produce — an
+image quietly shipping older code than its source — arriving through a different
+door. Deleting the checked-in duplicate closed the door where a *directory*
+drifts. This is the one where a *ref* drifts, and the fix has the same shape:
+the publishing step has to carry everything it claims to publish.
+
+Pushing `main` first means the tag can only ever name something the remote
+already has.
 
 It accepts a tag or a full commit SHA, never a branch. A moving branch would
 make yesterday's image unreproducible today, and the whole point of an image is
@@ -97,6 +121,30 @@ If the staged launcher comes up missing or incomplete, the build fails on the
 spot. That check is deliberate — a missing launcher does not break the image
 build on its own, it just produces a console that boots to a connection error,
 which is a far more expensive way to discover the problem.
+
+#### Why the build does not check the pin for staleness
+
+**The incident above is invisible to CI, and it is worth knowing why.** Any
+check comparing `KYBER_SHELL_REF` against kyber-shell's `main` sees only what
+GitHub has. Unpushed work is not late — it does not exist as far as the check is
+concerned, and `main` and the pin agree perfectly. The only machine that can
+detect it is the one holding the commits, which is why the mitigation above is
+in the push command rather than in a workflow.
+
+What such a check *would* see is the pin sitting behind a published `main` —
+which is the normal state for as long as launcher work is in progress, meaning
+most days. A warning that is right on most days and important on one is a
+warning nobody reads by the time it matters.
+
+The check that is free of false alarms is narrower: `KYBER_SHELL_REF` must be an
+ancestor of kyber-shell's `main`. A pin that is not on `main` at all is always
+wrong — a tag on an abandoned branch, a SHA that was force-pushed away — and
+that is never a matter of timing. Cheap, real, and it does not address drift.
+
+The other direction stays on the table. A tag push in kyber-shell is the act
+that *means* "publish this", so a check triggered there — does `KYBER_SHELL_REF`
+name this tag yet? — fires on intent and never on an ordinary commit. It inverts
+the coupling, which is why it is written down here instead of built.
 
 ### Building locally
 
