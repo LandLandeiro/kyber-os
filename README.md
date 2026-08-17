@@ -134,13 +134,28 @@ channel either way.
 
 ### How the launcher reaches it
 
-The daemon writes to `/run/kyber/`, which the launcher cannot see: the launcher
-speaks HTTP and only sees the tree `darkhttpd` serves. An absolute symlink joins
-them, created at build time by `files/scripts/kyber-gameprofiled.sh`:
+The daemon writes to `/run/kyber/` and `/var/lib/kyber/`, neither of which the
+launcher can see: the launcher speaks HTTP and only sees the tree `darkhttpd`
+serves. Two absolute symlinks join them, created at build time by
+`files/scripts/kyber-gameprofiled.sh`:
 
 ```
-/usr/share/kyber/launcher/state.json -> /run/kyber/state.json
+/usr/share/kyber/launcher/state.json    -> /run/kyber/state.json
+/usr/share/kyber/launcher/profiles.json -> /var/lib/kyber/profiles.json
 ```
+
+They answer different questions, which is why they are different files:
+`state.json` is **what the machine did**, `profiles.json` is **what was asked
+for**. A profile can request `schedutil` on a machine that does not offer it —
+the request lives in the second, the `unavailable` lives in the first, and the
+profile editor needs both.
+
+The second one is not a copy published into `/run`: it points at the real file
+in `/var/lib`, so there is no window in which the two versions disagree. Reading
+it over HTTP is safe against torn reads for the same reason `state.json` is —
+every write to it is `.tmp` + `rename(2)`, and it is written `0644` explicitly
+rather than inheriting whatever umask the writer had.
+
 
 `darkhttpd` follows it because it never resolves paths — no `lstat`, no
 `realpath`, no `O_NOFOLLOW`, it just `open()`s the target. That is also why its
@@ -405,10 +420,11 @@ than a missing option.
 
 ### The profile comes from disk
 
-Since the daemon takes no commands, the profile it applies comes from
-`/var/lib/kyber/profiles.json`, seeded on first run from
-`/usr/share/kyber/profiles.default.json`. That file is the seam the future
-`kyber-api` will write to; the format is already what it will save.
+The profile the daemon applies comes from `/var/lib/kyber/profiles.json`, seeded
+on first run from `/usr/share/kyber/profiles.default.json`. Everything writes
+there and nothing writes anywhere else: `vi` edits it, and so does the command
+socket. That is the point — one path, so the editor and the file cannot tell
+different stories.
 
 **With no game running the daemon applies nothing** — it observes and reports.
 Two practical reasons: not fighting Bazzite's own power management on a console
@@ -664,7 +680,8 @@ podman run --rm ghcr.io/landlandeiro/kyber:latest bash -c '
   ls /usr/lib/kyber/gameprofiled/__main__.py
   ls /usr/lib/systemd/system/kyber-gameprofiled.service
   ls /usr/share/kyber/profiles.default.json
-  readlink /usr/share/kyber/launcher/state.json   # /run/kyber/state.json
+  readlink /usr/share/kyber/launcher/state.json      # /run/kyber/state.json
+  readlink /usr/share/kyber/launcher/profiles.json  # /var/lib/kyber/profiles.json
 
   # The frame limiter goes through the compositor, so this is what the
   # fpsLimit axis needs to exist before it can be anything but unsupported.

@@ -488,6 +488,86 @@ class TestConfig(Base):
         self.assertTrue(cfg.reload())
         self.assertEqual(cfg.profile_for(1)["governor"], "schedutil")
 
+    def test_gravar_rele_do_disco_antes_de_mudar(self):
+        # Entre a última leitura e a gravação alguém pode ter editado o
+        # arquivo à mão. Regravar por cima da cópia em memória perderia
+        # essa edição sem dizer nada.
+        alvo = self.raiz / "var/lib/kyber/profiles.json"
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        alvo.write_text(json.dumps({"default": {"governor": "powersave"}}))
+        cfg = config.Config(self.fs, log=self.log.append)
+
+        alvo.write_text(json.dumps({"default": {"governor": "powersave"},
+                                    "games": {"1": {"gpuLevel": "alto"}}}))
+        self.assertIsNone(cfg.gravar(
+            lambda doc: doc.setdefault("games", {}).update({"2": {}})))
+
+        gravado = json.loads(alvo.read_text())
+        self.assertEqual(sorted(gravado["games"]), ["1", "2"])
+
+    def test_gravar_nao_mexe_no_que_esta_em_memoria(self):
+        # Quem aprende que o arquivo mudou é o reload() do próximo ciclo,
+        # pelo mesmo caminho por onde aprende sobre o `vi`. Atualizar a
+        # memória aqui seria o segundo caminho.
+        alvo = self.raiz / "var/lib/kyber/profiles.json"
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        alvo.write_text(json.dumps({"default": {"governor": "powersave"}}))
+        cfg = config.Config(self.fs, log=self.log.append)
+
+        cfg.gravar(lambda doc: doc.update({"default": {"governor": "performance"}}))
+        self.assertEqual(cfg.profile_for(1)["governor"], "powersave")
+        self.assertTrue(cfg.reload())
+        self.assertEqual(cfg.profile_for(1)["governor"], "performance")
+
+    def test_gravar_e_atomico_e_legivel_por_nobody(self):
+        # O arquivo é SERVIDO: o darkhttpd o alcança por symlink e faz
+        # stat + sendfile sem lock. Escrita no lugar entregaria JSON pela
+        # metade; e sem o chmod explícito o modo sairia do umask de quem
+        # escreveu, que é uma variável de ambiente decidindo se o console
+        # tem editor de perfil.
+        import os
+        import stat
+        alvo = self.raiz / "var/lib/kyber/profiles.json"
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        alvo.write_text("{}")
+        cfg = config.Config(self.fs, log=self.log.append)
+        cfg.gravar(lambda doc: doc.setdefault("games", {}).update({"1": {}}))
+
+        self.assertEqual(stat.S_IMODE(os.stat(alvo).st_mode) & 0o044, 0o044)
+        # O temporário não sobra: só o arquivo final é alcançável.
+        self.assertFalse((alvo.parent / "profiles.json.tmp").exists())
+        json.loads(alvo.read_text())
+
+    def test_gravar_sobre_o_embutido_nao_contamina_o_padrao_de_fabrica(self):
+        """Sem arquivo, a gravação parte do padrão embutido.
+
+        Se essa cópia for rasa, o título gravado entra na constante do
+        módulo e fica lá pelo resto da vida do processo: o padrão de
+        fábrica deixa de ser de fábrica sem nada ter mudado no disco, e
+        RESTAURAR PADRÃO passa a devolver o perfil de outro jogo."""
+        cfg = config.Config(self.fs, log=self.log.append)
+        cfg.gravar(lambda doc: doc.setdefault("games", {})
+                   .update({"553850": {"governor": "powersave"}}))
+        self.assertEqual(config.EMBUTIDO["games"], {})
+        self.assertEqual(config.embutido()["games"], {})
+        self.assertEqual(config.EMBUTIDO["default"]["governor"], "performance")
+
+    def test_arquivo_ilegivel_nao_trava_a_gravacao_nem_some_com_o_que_havia(self):
+        # Num console sem terminal, recusar gravar para sempre é beco sem
+        # saída. Mas apagar em silêncio um arquivo de perfis que só perdeu
+        # uma vírgula seria trocar problema visível por invisível.
+        alvo = self.raiz / "var/lib/kyber/profiles.json"
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        alvo.write_text('{"games": {"1": {"governor": "power')
+        cfg = config.Config(self.fs, log=self.log.append)
+        self.assertIsNone(cfg.gravar(
+            lambda doc: doc.setdefault("games", {}).update({"2": {}})))
+
+        self.assertEqual(json.loads(alvo.read_text())["games"], {"2": {}})
+        guardado = alvo.parent / "profiles.json.corrompido"
+        self.assertIn("governor", guardado.read_text())
+        self.assertTrue(any("ilegível" in linha for linha in self.log))
+
     def test_rele_so_quando_o_arquivo_muda(self):
         alvo = self.raiz / "var/lib/kyber/profiles.json"
         alvo.parent.mkdir(parents=True, exist_ok=True)
