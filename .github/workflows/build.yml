@@ -44,7 +44,7 @@ jobs:
       # commit, so you can always tie an image back to launcher source.
       # ===================================================================
       KYBER_SHELL_REPO: LandLandeiro/kyber-shell
-      KYBER_SHELL_REF: v0.9.0
+      KYBER_SHELL_REF: v0.10.0
       # Where the recipe's `files` module expects to find the launcher.
       KYBER_LAUNCHER_DEST: files/system/usr/share/kyber/launcher
       # And where the boot splash art is rendered into. Same idea: not in
