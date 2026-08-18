@@ -96,6 +96,13 @@ modules:
         # dar poder de desligar a máquina ao usuário escolhido
         # justamente por não ter poder nenhum.
         - kyber-power.service
+        # A biblioteca Steam de verdade, em 127.0.0.1:8790. Também unit de
+        # usuário, e aqui não por simetria: o $HOME do console é
+        # `drwx------`, então o darkhttpd (nobody) não alcança arquivo
+        # nenhum da Steam. Só quem roda com o uid da pessoa lê o que é
+        # dela. SÓ LÊ — duas rotas GET, nenhum verbo de escrita: o
+        # kyber-power age, esta lê, e é essa a linha entre as duas.
+        - kyber-library.service
 
   # A kyber-session-desktop.service NÃO é habilitada e não aparece aqui:
   # ela é ACIONADA pelo kyber-power, com a autorização do

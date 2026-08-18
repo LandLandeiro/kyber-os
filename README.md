@@ -25,6 +25,12 @@ screen come from this machine. The Steam side — library, cover art, downloads 
 is still the mock until Etapa 7; the two arrive separately because `useAdapter`
 composes partial implementations.
 
+**The library is real.** `kyber-library` reads the installed titles off disk and
+serves them, art included, so the shelf shows what this machine actually has —
+which today is one game and two Steam runtimes that the shelf correctly refuses
+to show. The Steam login screen and the downloads list are still the mock, and
+launching a game from the launcher is the next delivery.
+
 Boot no longer starts with several black seconds: screen 19's splash — the
 wordmark and an amber progress bar — covers the gap between the power button and
 the launcher, from a Plymouth theme rendered out of the launcher's own font.
@@ -53,6 +59,7 @@ browser inside it and no desktop behind it. Three pieces make that work:
 | Machine state and performance profiles | `kyber-gameprofiled.service` → `/run/kyber/state.json` |
 | Profile writes, unprivileged | `kyber-api.service` → `127.0.0.1:8788` |
 | Power verbs, inside the session | `kyber-power.service` (user) → `127.0.0.1:8789` |
+| The installed Steam library | `kyber-library.service` (user) → `127.0.0.1:8790` |
 
 The session plugs into `gamescope-session-plus`, the same mechanism Bazzite's
 own Steam session uses. That framework starts gamescope and runs our
@@ -1019,6 +1026,158 @@ socket, at most 8 conversations per round, and the wait is sliced at 250 ms
 because Python resumes `select` after a signal rather than returning from it
 (PEP 475) — an unsliced wait would hold SIGTERM until the next publish.
 
+## The Steam library
+
+The twelve titles in `mock.js` are gone. `kyber-library` reads what is
+actually installed and serves it on `127.0.0.1:8790`:
+
+| Route | What it answers |
+| --- | --- |
+| `GET /library.json` | the installed titles, resolved |
+| `GET /art/<appid>/<cover\|hero\|header\|logo>` | the JPEG Steam already downloaded, off disk |
+
+**Both routes are GET and there is no third one.** `kyber-power` acts on the
+machine; this one reads files. That line — not "one process per subject" — is
+why they are separate pieces: merging them would put a read surface inside the
+process that ends your session, and give a reader the ability to switch the
+console off.
+
+### Why it cannot be `darkhttpd`
+
+The console's `$HOME` is `drwx------`. `darkhttpd` runs as `nobody` and does not
+get past the first directory of the path — measured with `namei` on the machine,
+not assumed. No symlink fixes that, and serving Steam's tree over HTTP would
+carry `userdata/<id>/config/localconfig.vdf` along with the manifests, which is
+account data. And `gameprofiled` is out for the reason it already documents:
+it is root and publishes a world-readable `state.json`, which is exactly why it
+publishes an appid and never a game name.
+
+### Three sources, three questions
+
+| File | Answers | Format |
+| --- | --- | --- |
+| `steamapps/appmanifest_*.acf` | what is **installed**, and how big | VDF text |
+| `userdata/*/config/localconfig.vdf` | how much it was **played** | VDF text |
+| `appcache/appinfo.vdf` | what the thing **is** | VDF **binary** |
+
+The third one is what keeps "Steam Linux Runtime 2.0 (soldier)" off the shelf.
+Of the three titles installed on the console, **two are runtimes**, and nothing
+in the manifest separates them from the third — all 27 keys were enumerated and
+there is no `is_game`. The answer is `common.type` in `appinfo.vdf`:
+
+```
+1070560  Tool   Steam Linux Runtime 1.0 (scout)
+1391110  Tool   Steam Linux Runtime 2.0 (soldier)
+1625450  game   Muck
+```
+
+Signals that were tested and rejected: `LastPlayed == 0` (a game installed and
+never played reads the same), presence in the art cache (**runtimes have
+entries** — the three share one generic icon), a missing vertical cover (76% of
+real games are missing it too), and `oslist` (both are `linux`). Name matching
+was never on the table: it breaks on the first title called *Steam World Dig*.
+
+### What the parsers cost, and where they are fragile
+
+A text VDF parser is ~70 lines and was **differentially tested against the `vdf`
+library from PyPI over all 96 text `.vdf` files of a real installation**:
+
+| Family | Identical | Divergent |
+| --- | --- | --- |
+| Steam data (`config/`, `userdata/`, `steamapps/`) | 16/17 | **0** |
+| Steam Input (`controller_base/`) | 3/79 | 76 |
+
+Every one of those 76 is the same thing — **duplicate keys**. The controller
+themes repeat `"group"` dozens of times at one level; the reference merges, a
+dict overwrites. KYBER reads none of those files, and the two it does read have
+no duplicates. Here the last one wins, declared rather than accidental.
+
+Two traps that only showed up by running it:
+
+- **UTF-8 BOM.** 30 of the 96 files start with one. Untreated, the BOM becomes a
+  token and the error points at line 2 of a file whose line 2 is fine.
+- **`\uXXXX` stays literal.** Neither this parser nor the reference decodes it.
+
+The binary reader is ~90 lines, and the format has a sharper edge: **v28+ keys
+are `uint32` indices into a string table at the end of the file**, not strings.
+The console's file is v29. A "binary VDF" parser written for v27 — which is what
+you find lying around — reads garbage and does not complain.
+
+**How we know it is right**: every entry declares its own size, so the read has a
+built-in check — the KV parser has to stop on exactly the byte the entry
+declared. Against a real 550 KB `appinfo.vdf`, **285 of 285 entries close on the
+exact byte**, with the terminator landing 4 bytes before the string table. The
+whole file consumed, no slack. `tests/test_biblioteca.py` re-runs that against
+the real file when the machine has Steam installed, and against fake trees when
+it does not. Cost: 12 ms.
+
+### `Game` and `game`
+
+Both spellings live in the same file — **42 capitalised, 9 not**. Comparing
+against `"Game"` hides nine games, silently. The comparison is lowercased, and
+that sentence is in the code so nobody simplifies it back.
+
+`type` **absent** is not `type` false. `appinfo.vdf` is a cache; an appid Steam
+has not seen is not in it. The console **shows** those, and the journal says it
+did: a tool on the shelf is ugly, a game vanishing from it is a silent bug, and
+this repository has catalogued that class enough times.
+
+### Never compare a path as a string
+
+The console's `libraryfolders.vdf` says `"path" "/var/home/landeiro/..."` while
+`$HOME` is `/home/landeiro/...`. Same directory — on Fedora Atomic `/home` is a
+symlink to `var/home` and Steam stored the resolved form. *Opening* works either
+way; *comparing* does not, and the symptom is a library listed twice or not at
+all. Every path goes through `realpath` before it becomes a comparison key. On
+an ordinary distribution this never happens, which is exactly why it reads like
+excessive care.
+
+### The art comes off disk
+
+Steam already downloaded it: `appcache/librarycache/<appid>/`, 28 MB and 137
+titles on the console. Fetching over the network what is already on disk would
+put the console's *first screen* behind the house's internet.
+
+Measured against the CDN with 25 appids from a real library:
+
+| Format | Exists |
+| --- | --- |
+| `header.jpg` | 20/25 (80%) |
+| `library_600x900.jpg` — what the shelf uses | **6/25 (24%)** |
+| `library_hero.jpg` | 6/25 (24%) |
+
+So **CAPA GERADA is the common case, not the fallback** — roughly three titles
+in four. The launcher already draws it; what changes is how often. `hasArt` and
+`hasHero` ride along in the JSON precisely so the shelf does not ask for three
+covers that do not exist for every one that does.
+
+Art responses carry an ETag of mtime+size and answer `304`. That validator is
+trustworthy *here* because these files live in `/home` with real mtimes —
+unlike `/usr`, where OSTree zeroes them and [that cost two
+investigations](#the-browser-cache-outranks-the-ota).
+
+### Checking it
+
+```bash
+systemctl --user status kyber-library.service
+journalctl --user -u kyber-library -b   # says what it hid, and what it showed
+                                        # without knowing what it was
+
+curl -s http://127.0.0.1:8790/library.json | python3 -m json.tool
+curl -sI http://127.0.0.1:8790/art/1625450/cover | head -5
+
+# A refusal that is routine, not an error: three in four titles have no cover.
+curl -s http://127.0.0.1:8790/art/1625450/hero
+```
+
+### What did not move
+
+Downloads, storage figures and the Steam login screen are still the mock, and
+**launching a game is deliberately out** — screen 03 has to cover what shows up
+today when a title is started from outside the launcher, and that is its own
+delivery.
+
+
 ## The power menu
 
 Screen 12 offers four things, and each one is a `POST` to `kyber-power` on
@@ -1388,6 +1547,12 @@ different:
 | `bare` | nothing. No hwmon, no card, no cpufreq |
 | `dual_gpu` | integrated and discrete together; the choice must land on the one with more VRAM |
 
+`tests/test_biblioteca.py` builds fake Steam trees — manifests, `localconfig`,
+and a hand-assembled **binary** `appinfo.vdf` — so both parsers and the whole
+resolution run with no Steam installed and no network. When the machine *does*
+have Steam, two extra tests run the binary reader against the real file, because
+a fake tree can only ever agree with itself.
+
 `tests/test_power.py` runs the same way and does **not** turn the laptop off:
 `kyber-power` takes its executor by injection, and the suite injects one that
 only records what would have run. It is the discipline of the daemon's
@@ -1739,6 +1904,8 @@ published here.
 | `files/system/usr/libexec/kyber-session-desktop` | Points that drop-in at the desktop until the next boot |
 | `files/system/usr/lib/systemd/user/` | The user unit — `kyber-power`, the power verbs |
 | `files/system/usr/lib/kyber/kyberpower/` | The power piece — stdlib-only Python, runs as the session owner |
+| `files/system/usr/lib/kyber/kyberlibrary/` | The Steam library — two VDF parsers, one text and one binary |
+| `tools/levantar-steam.sh` | Read-only survey of a Steam install; how the facts above were established |
 | `files/system/usr/share/polkit-1/rules.d/` | One rule, naming one unit: who may ask for Desktop Mode |
 | `files/system/usr/share/plymouth/themes/kyber/` | Boot splash theme. The PNGs are generated, not committed |
 | `tools/gerar-splash.py` | Renders that art from kyber-shell's font, on the CI runner |

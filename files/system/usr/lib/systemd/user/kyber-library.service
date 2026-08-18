@@ -1,0 +1,45 @@
+[Unit]
+Description=KYBER biblioteca — a Steam instalada, em loopback
+Documentation=https://github.com/LandLandeiro/kyber-os
+
+# UNIT DE USUÁRIO, e aqui isso deixou de ser preferência para ser a única
+# opção: o $HOME do console é `drwx------`. O darkhttpd roda como
+# `nobody` e não passa do primeiro diretório do caminho — medido com
+# `namei` no aparelho. Não existe outro lugar de onde os arquivos da
+# Steam sejam legíveis por direito próprio.
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -P -m kyberlibrary
+Environment=PYTHONPATH=/usr/lib/kyber
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=2
+
+# Esta peça SÓ LÊ, e o endurecimento acompanha: ela não escreve em lugar
+# nenhum, não fala com o D-Bus e não executa nada. Ao contrário do
+# kyber-power — que também roda como a pessoa, mas cuja fronteira está no
+# polkit e não no processo —, aqui fechar significa alguma coisa.
+#
+# O que fica de fora e por quê: ProtectHome= não entra, porque o $HOME é
+# exatamente o que esta peça precisa ler; e é a única razão de ela
+# existir.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectClock=yes
+RestrictAddressFamilies=AF_INET
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+# default.target pelo mesmo motivo do kyber-power: não há garantia de que
+# alguém alcance o graphical-session.target dentro de uma sessão que é
+# gamescope-session-plus rodando um navegador.
+WantedBy=default.target
