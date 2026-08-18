@@ -10,6 +10,13 @@ cosign.private
 /files/system/usr/share/kyber/launcher/
 /.kyber-shell/
 
+# A arte do splash NAO mora aqui. O ./tools/gerar-splash.py a rasteriza no
+# CI a partir da fonte do kyber-shell, no mesmo ref em que o launcher e
+# buscado (.github/workflows/build.yml). Um PNG do wordmark commitado
+# seria uma copia da marca, e copia deriva em silencio — e' a mesma falha
+# que o diretorio versionado do launcher produzia.
+/files/system/usr/share/plymouth/themes/kyber/*.png
+
 # Bytecode do gameprofiled. A arvore em files/system/ vira /usr na imagem,
 # e __pycache__ compilado num Mac nao tem o que fazer ali dentro.
 __pycache__/

@@ -47,6 +47,9 @@ jobs:
       KYBER_SHELL_REF: v0.7.0
       # Where the recipe's `files` module expects to find the launcher.
       KYBER_LAUNCHER_DEST: files/system/usr/share/kyber/launcher
+      # And where the boot splash art is rendered into. Same idea: not in
+      # git, staged here, picked up by the `files` module.
+      KYBER_SPLASH_DEST: files/system/usr/share/plymouth/themes/kyber
     steps:
       # We do the checkouts ourselves rather than letting the BlueBuild
       # action do it. Its internal checkout runs with the default
@@ -93,6 +96,38 @@ jobs:
 
           echo "launcher ${KYBER_SHELL_REPO}@$(git -C .kyber-shell rev-parse HEAD)"
           echo "  $(find "${KYBER_LAUNCHER_DEST}" -type f | wc -l) files, ${fonts} embedded fonts"
+
+      # The splash is rendered from the SAME checkout the launcher came from,
+      # at the same pinned ref. A PNG of the wordmark committed to this
+      # repository would be a copy of the brand, and a copy drifts in
+      # silence — the exact failure the vendored launcher directory used to
+      # produce, and the one the ref pin produced again through another
+      # door. Here the font that draws the splash is literally the font the
+      # interface uses two seconds later.
+      #
+      # Versions are pinned, and not out of superstition: the whole theme
+      # directory is copied into the initramfs, so a PNG whose bytes move
+      # moves the initramfs, and a moved initramfs is tens of megabytes on
+      # the next OTA. A fixed rasteriser is what keeps the bytes stable.
+      - name: Render the boot splash from the launcher's font
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install --quiet --disable-pip-version-check \
+              'fonttools[woff]==4.63.0' 'pillow==12.3.0'
+
+          ./tools/gerar-splash.py \
+              --fonte .kyber-shell/src/assets/fonts/familjen-grotesk-400700-latin.woff2 \
+              --saida "${KYBER_SPLASH_DEST}"
+
+          # Same discipline as the launcher check above: fail here, where a
+          # line of log says why, rather than at boot, where the console
+          # just shows a black screen for fifteen seconds and says nothing.
+          for png in wordmark trilho progresso ponta; do
+              test -s "${KYBER_SPLASH_DEST}/${png}.png"
+          done
+          test -f "${KYBER_SPLASH_DEST}/kyber.script"
+          test -f files/system/usr/share/plymouth/plymouthd.defaults
 
           # Keep the mockups and docs out of the container build context.
           rm -rf .kyber-shell

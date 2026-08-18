@@ -43,6 +43,12 @@ modules:
         # a fetch(); over file:// the browser's CORS rules block both and the
         # screen stays blank. 63 KB installed.
         - darkhttpd
+        # O plugin de splash com que o tema do KYBER é escrito. O two-step,
+        # que já vem na imagem, faz todo o resto do desenho — cores exatas,
+        # barra de 5px em tela cheia colada na base, wordmark centralizado —
+        # e não faz UMA coisa: box-shadow. O brilho da barra é parte do
+        # desenho e não enfeite, e é só por ele que este pacote entra.
+        - plymouth-plugin-script
 
   # gameprofiled has no package of its own: it is stdlib-only Python, laid
   # into /usr/lib/kyber/ by the `files` module above. Nothing to install —
@@ -95,5 +101,30 @@ modules:
   # ela é ACIONADA pelo kyber-power, com a autorização do
   # /usr/share/polkit-1/rules.d/50-kyber-session-desktop.rules. Unit de
   # energia que subisse no boot seria o oposto do que se quer.
+
+  # ÚLTIMO DE PROPÓSITO, e o módulo pede isso por escrito. Ele regenera o
+  # initramfs com dracut, uma vez por kernel, e o que entra lá dentro é o
+  # estado da árvore NAQUELE instante — inclusive o tema do plymouth, que o
+  # plymouth-populate-initrd resolve consultando o
+  # /usr/share/plymouth/plymouthd.defaults depositado pelo módulo `files`
+  # lá em cima.
+  #
+  # SEM ISTO O TEMA NÃO APARECE. O plymouth do boot roda de dentro do
+  # initramfs, e um initramfs que não foi regenerado continua carregando o
+  # tema anterior — a imagem builda verde, o arquivo está no lugar certo em
+  # /usr, e a tela continua mostrando o splash do Bazzite.
+  #
+  # É A ÚNICA MUDANÇA DESTA IMAGEM QUE PODE FAZER O CONSOLE NÃO BOOTAR. O
+  # dracut lê /usr/lib/dracut/dracut.conf.d/, então a configuração do
+  # próprio ublue é respeitada, mas um initramfs regenerado é um initramfs
+  # novo. O conserto está no README, em "Rolling back", escrito para ser
+  # executado sem raciocinar.
+  #
+  # Custo: um dracut por kernel no CI (+1 a 3 min sobre os 4 a 7 de hoje) e
+  # o initramfs.img passando a ser arquivo desta camada. No console, custo
+  # ZERO — o caminho documentado do Bazzite é `rpm-ostree initramfs
+  # --enable`, que faz a MÁQUINA regenerar a cada update; fazer no build
+  # compra isso de volta.
+  - type: initramfs
 
   - type: signing # this sets up the proper policy & signing files for signed images to work fully

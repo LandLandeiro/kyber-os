@@ -1,0 +1,19 @@
+[Plymouth Theme]
+Name=KYBER
+Description=Wordmark KYBER sobre preto, com a barra âmbar de progresso na base
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/kyber
+ScriptFile=/usr/share/plymouth/themes/kyber/kyber.script
+
+# ModuleName=script e não two-step, e a diferença é UMA coisa: o brilho.
+#
+# O two-step faria todo o resto — UseProgressBar, ProgressBarHeight=5,
+# ProgressBarWidth=-1 (tela cheia), ProgressBarVerticalAlignment=1.0,
+# cores exatas, watermark centralizado, e a barra dirigida pelo mesmo
+# fraction_done. O que ele não tem é box-shadow, e o brilho da barra é
+# parte do desenho, não enfeite.
+#
+# Se um dia o plymouth-plugin-script sair do caminho, o two-step é o
+# plano B declarado, e o que se perde é exatamente o halo.

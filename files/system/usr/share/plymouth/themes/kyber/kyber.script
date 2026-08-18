@@ -1,0 +1,161 @@
+# =====================================================================
+# KYBER — splash de boot (tela 19)
+#
+# Wordmark sozinho sobre preto, barra âmbar de 5px colada na base, com o
+# brilho do desenho. O símbolo NÃO entra: ele tem uma fenda âmbar
+# vertical e esta tela já tem uma barra âmbar horizontal, e só uma das
+# duas significa alguma coisa. Um tratamento visual, um significado.
+#
+# A arte não está versionada: o ./tools/gerar-splash.py a rasteriza no
+# CI a partir da Familjen Grotesk do kyber-shell, no mesmo ref em que o
+# launcher é buscado. PNG de wordmark commitado seria uma cópia da
+# marca, e cópia deriva em silêncio.
+#
+# ---------------------------------------------------------------------
+# O QUE A BARRA MEDE, E ELA NÃO MEDE PROGRESSO REAL.
+#
+# É TEMPO, RECALIBRADO PELOS MARCOS DO BOOT ANTERIOR, ESTIMANDO CONTRA
+# 60 s NO PRIMEIRO BOOT.
+#
+# Escrito assim, por extenso, porque daqui a seis meses a barra parece
+# medir o boot e não mede. O mecanismo é este: o plymouthd carrega
+# /var/lib/plymouth/boot-duration, gravado na partida anterior como
+# pares `percentual:mensagem-de-status`. Durante o boot, as mensagens de
+# status do systemd REANCORAM o percentual naqueles marcos; entre um
+# marco e o seguinte, ele avança por tempo (ply-progress.c). Sem cache —
+# primeira partida da máquina, ou /var limpo — não há marco nenhum e o
+# avanço é puro tempo contra DEFAULT_BOOT_DURATION, que é 60 s.
+#
+# É o dado mais honesto que o plymouth entrega. Não existe canal em que
+# ele saiba quantas units faltam.
+#
+# ---------------------------------------------------------------------
+# COMO A BARRA É MONTADA, e por que em duas peças.
+#
+# O brilho é o box-shadow: uniforme ao longo de x, e com uma ponta
+# arredondada onde o preenchimento termina. Então:
+#
+#   progresso.png  fatia do MEIO da barra, 8×48. Uniforme em x, então
+#                  esticar na horizontal reproduz o interior exato.
+#   ponta.png      o fim de verdade, 128×48, com a barra ocupando a
+#                  metade esquerda. NÃO estica: ela é o borrão do fim.
+#
+# A ponta cobre os últimos 64px do corpo. 64px é ~5σ do desfoque, que é
+# onde as duas peças já são o mesmo pixel — é isso que faz a emenda não
+# existir. Conferido: a montagem sai idêntica, pixel a pixel, ao quadro
+# renderizado de uma vez só.
+# =====================================================================
+
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+global.largura = Window.GetWidth();
+global.altura = Window.GetHeight();
+
+# Mesmo palco do launcher: 1920×1080 reescalado pela altura real. O
+# launcher faz isso por transform: scale(); aqui é a mesma regra, para
+# um painel fora de 1080p não ter dois comportamentos no mesmo segundo.
+global.escala = global.altura / 1080;
+
+# ---------------------------------------------------------------------
+# Wordmark. Sai do gerador em 2× e é REDUZIDO aqui: o resize do plymouth
+# interpola (ply_pixel_buffer_resize), então reduzir é limpo — ampliar
+# não seria, e um painel 4K ampliaria.
+# ---------------------------------------------------------------------
+marca.fonte = Image("wordmark.png");
+marca.image = marca.fonte.Scale(
+        Math.Int(marca.fonte.GetWidth() * global.escala / 2),
+        Math.Int(marca.fonte.GetHeight() * global.escala / 2));
+marca.sprite = Sprite(marca.image);
+marca.sprite.SetX(Math.Int((global.largura - marca.image.GetWidth()) / 2));
+marca.sprite.SetY(Math.Int((global.altura - marca.image.GetHeight()) / 2));
+marca.sprite.SetZ(1);
+
+# ---------------------------------------------------------------------
+# Trilho: 5px na base, largura inteira, sempre visível. Ele é o que faz
+# a barra ter um lugar antes de ter valor.
+# ---------------------------------------------------------------------
+global.barra_h = Math.Int(5 * global.escala);
+if (global.barra_h < 1) {
+        global.barra_h = 1;
+}
+
+trilho.fonte = Image("trilho.png");
+trilho.image = trilho.fonte.Scale(global.largura, global.barra_h);
+trilho.sprite = Sprite(trilho.image);
+trilho.sprite.SetX(0);
+trilho.sprite.SetY(global.altura - global.barra_h);
+trilho.sprite.SetZ(2);
+
+# ---------------------------------------------------------------------
+# Progresso: corpo esticável + ponta fixa.
+# ---------------------------------------------------------------------
+global.faixa = Math.Int(48 * global.escala);
+global.ponta_w = Math.Int(128 * global.escala);
+global.ponta_meia = Math.Int(global.ponta_w / 2);
+global.topo = global.altura - global.faixa;
+
+corpo.fonte = Image("progresso.png");
+corpo.sprite = Sprite(corpo.fonte);
+corpo.sprite.SetX(0);
+corpo.sprite.SetY(global.topo);
+corpo.sprite.SetZ(3);
+corpo.sprite.SetOpacity(0);
+
+ponta.fonte = Image("ponta.png");
+ponta.image = ponta.fonte.Scale(global.ponta_w, global.faixa);
+ponta.sprite = Sprite(ponta.image);
+ponta.sprite.SetY(global.topo);
+ponta.sprite.SetZ(4);
+ponta.sprite.SetOpacity(0);
+
+# Último valor DESENHADO, em pixels. A comparação é em pixel e não em
+# fração porque o plymouth chama isto ~50×/s e cada Scale() aloca um
+# buffer novo: sem a guarda, o splash faria dezenas de redimensionamentos
+# por segundo para redesenhar a mesma coisa, dentro do initramfs, no
+# minuto mais apertado do boot.
+global.desenhado = -1;
+
+fun desenhar(preenchido) {
+        if (preenchido == global.desenhado) {
+                return;
+        }
+        global.desenhado = preenchido;
+
+        if (preenchido <= 0) {
+                corpo.sprite.SetOpacity(0);
+                ponta.sprite.SetOpacity(0);
+                return;
+        }
+
+        # O corpo vai até onde a ponta começa; a ponta carrega o resto.
+        corpo_w = preenchido - global.ponta_meia;
+        if (corpo_w > 0) {
+                corpo.sprite.SetImage(corpo.fonte.Scale(corpo_w, global.faixa));
+                corpo.sprite.SetOpacity(1);
+        } else {
+                corpo.sprite.SetOpacity(0);
+        }
+
+        # No começo do boot a ponta nasce com x negativo e o plymouth
+        # recorta na borda — que é exatamente o que o CSS faz com o
+        # brilho da esquerda, que também cai fora da tela.
+        ponta.sprite.SetX(preenchido - global.ponta_meia);
+        ponta.sprite.SetOpacity(1);
+}
+
+fun ao_progredir(duracao, fracao) {
+        desenhar(Math.Int(global.largura * fracao));
+}
+
+Plymouth.SetBootProgressFunction(ao_progredir);
+
+# O desligamento e o reinício usam o mesmo tema. Deixar a barra parada
+# no valor do boot anterior mostraria um número que não quer dizer nada;
+# zerada, o trilho sozinho é a leitura correta — "a máquina está saindo,
+# e não há progresso a relatar".
+fun ao_sair() {
+        desenhar(0);
+}
+
+Plymouth.SetQuitFunction(ao_sair);

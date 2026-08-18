@@ -1,0 +1,23 @@
+# Padrão de distribuição, sobrescrito pelo KYBER.
+#
+# EM /usr, E NÃO EM /etc, de propósito. O plymouth procura o tema em
+# /etc/plymouth/plymouthd.conf primeiro e cai aqui depois (main.c:423 e
+# :440; plymouth-set-default-theme faz a mesma cadeia). Declarar em /etc
+# seria repetir a armadilha do autologin: /etc é mesclado em três vias a
+# cada deploy, a mesclagem preserva deleção local, e o arquivo não volta
+# sozinho. Em /usr o OTA é dono, e não há como perder.
+#
+# É a mesma cadeia que o /usr/libexec/plymouth/plymouth-populate-initrd
+# consulta para decidir QUAL tema entra no initramfs — por isso o módulo
+# `initramfs` tem que ser o último da receita, depois do `files` que
+# deposita este arquivo.
+#
+# As outras três chaves são as do Fedora, repetidas verbatim. Este
+# arquivo pertence ao pacote plymouth e a nossa camada o substitui
+# inteiro; copiar o resto é o que impede a substituição de apagar
+# configuração que não é nossa.
+[Daemon]
+Theme=kyber
+ShowDelay=0
+DeviceTimeout=8
+UseSimpledrmNoLuks=1

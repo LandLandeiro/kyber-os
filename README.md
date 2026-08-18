@@ -25,6 +25,10 @@ screen come from this machine. The Steam side — library, cover art, downloads 
 is still the mock until Etapa 7; the two arrive separately because `useAdapter`
 composes partial implementations.
 
+Boot no longer starts with several black seconds: screen 19's splash — the
+wordmark and an amber progress bar — covers the gap between the power button and
+the launcher, from a Plymouth theme rendered out of the launcher's own font.
+
 The console can also be turned off from its own interface now. Screen 12's four
 verbs — poweroff, reboot, suspend, Desktop Mode — go to `kyber-power`, a user
 service running inside the session, and that is what closes Etapa 7a's
@@ -130,6 +134,12 @@ closed list** — `plasma`, `plasma-wayland`, `plasma-x11-persistent`,
 neither is `desktop`, which is what `short_session_recover` had been passing
 since it was written: the escape hatch printed to a stderr nobody reads and
 returned failure. It has been corrected to `plasma`.
+
+**`steamos-session-select desktop` never worked, and it was typed by hand on
+this console in the belief that it did.** The command looks like it belongs — it
+is the obvious name, it is on `PATH`, it exits without a visible complaint on a
+terminal you are not watching. It is written down here because a command that
+fails quietly and plausibly is worse than one that does not exist.
 
 The `-persistent` variants are the ones that call
 `steamosctl set-default-login-mode desktop` and create the sentinel; the plain
@@ -250,6 +260,12 @@ The console kept drawing the previous one, served from Chromium's disk cache,
 with nothing in any log to say so. It cost two investigations in one day — the
 second one *after* the cause was already known, which is what a failure with no
 signal does to you.
+
+**The browser is the obvious suspect and it is the wrong one.** Two separate
+investigations went looking at Chromium's flags and Chromium's profile
+directory; the cause is in OSTree, one layer below anything the browser can see.
+Anyone arriving at this symptom will suspect the browser first, so the chain is
+written out here in full.
 
 The chain has four links and every one of them is behaving as documented:
 
@@ -1021,8 +1037,12 @@ power state is whether the screen is on.
 ### Why this is not part of `kyber-api`
 
 `kyber-api` already speaks HTTP, already has CORS settled and is already the
-piece the launcher reaches. It is still the wrong home, for three reasons that
-are not about taste.
+piece the launcher reaches. Two small Python servers on two loopback ports will
+look like waste to somebody, eventually, and the merge will look like an
+afternoon's tidying. It is written out here so that the argument outlives the
+first person who counts processes instead of authority.
+
+It is the wrong home, for three reasons that are not about taste.
 
 **It runs as a user built to have no authority.** The `kyber-api` user's entire
 power is write permission on one Unix socket: empty `CapabilityBoundingSet`,
@@ -1112,6 +1132,140 @@ is `allow_active=yes`, so on a systemd-boot machine
 image boots through GRUB, where the equivalent is `grub2-reboot`, which writes
 to `/boot/grub2/grubenv` and needs root — a different shape, and one that
 touches boot state rather than session state.
+
+
+## The boot splash
+
+There are several seconds between the power button and the launcher, and they
+used to be black. Black is indistinguishable from broken — it produced the
+question *"is it stuck or is it loading?"* more than once in a single evening,
+which is the same class of problem as telemetry that stops advancing.
+
+Screen 19 fills them: the KYBER wordmark on black, with a 5 px amber progress
+bar along the bottom edge.
+
+**It is the wordmark alone, not the full brand.** The KYBER symbol carries a
+vertical amber slot, and this screen already has a horizontal amber bar — two
+amber marks on one screen where only one of them means anything. *One visual
+treatment, one meaning* is a project rule. The DM Mono signature is out for a
+plainer reason: it disappears at three metres, which is the actual viewing
+distance, and boot is a moment of waiting rather than a moment of branding.
+
+### What the bar measures, and what it does not
+
+**It is time, recalibrated by the previous boot's milestones, estimating
+against 60 s on the first boot.** It is not real progress, and the theme says so
+in its own comments, because in six months the bar will look like it is
+measuring the boot.
+
+`plymouthd` loads `/var/lib/plymouth/boot-duration`, written on the previous
+boot as `percentage:status-message` pairs. During boot, systemd's status
+messages *re-anchor* the percentage at those milestones; between anchors it
+advances on time alone (`ply-progress.c`). With no cache — first boot of a
+machine, or a wiped `/var` — there are no anchors and the whole thing is time
+against `DEFAULT_BOOT_DURATION`, which is 60 s.
+
+It is the most honest number Plymouth has. There is no channel where it learns
+how many units are left.
+
+### Why `script` and not `two-step`
+
+`two-step` would do everything else: `UseProgressBar`, `ProgressBarHeight=5`,
+`ProgressBarWidth=-1` for full screen width, `ProgressBarVerticalAlignment=1.0`,
+exact colours, a centred watermark, and the same `fraction_done` driving the
+bar. The one thing it has no key for is `box-shadow`, and the glow under the bar
+is part of the drawing rather than decoration. That single difference is the
+whole reason `plymouth-plugin-script` is installed; `two-step` stays written
+down as the fallback, and what would be lost is exactly the halo.
+
+The glow is built from two sprites, because the shadow is uniform along `x` and
+rounded only where the fill ends:
+
+| Image | Role |
+| --- | --- |
+| `progresso.png` | 8×48 slice from the *middle* of the bar. Uniform in `x`, so stretching horizontally reproduces the interior exactly |
+| `ponta.png` | 128×48, the real end, with the bar filling its left half. Never stretched |
+
+The tip covers the last 64 px of the body — about 5σ of the blur, which is where
+the two pieces are already the same pixel. That is what makes the seam not
+exist: the assembled frame is pixel-identical to one rendered in a single pass.
+
+### The art is generated, not committed
+
+`tools/gerar-splash.py` rasterises the four PNGs on the CI runner from
+kyber-shell's `familjen-grotesk-400700-latin.woff2`, at the same pinned ref the
+launcher comes from. They are gitignored, exactly like the launcher.
+
+A committed PNG of the wordmark would be **a copy of the brand**, and a copy
+drifts in silence — change the font in kyber-shell and the console keeps booting
+with the old letterforms, nothing red anywhere. That is the vendored-launcher
+failure and the stale-ref failure arriving through a third door. Generated here,
+the font that draws the splash is literally the font the interface uses two
+seconds later.
+
+The font is variable (`wght` 400–700) and is **instanced at 700** before
+rasterising. Asking the rasteriser for bold without instancing leaves the axis
+at its default of 400: the wordmark would come out thin, and nobody would notice
+until the console was switched on.
+
+Two values deviate from the mockup, both deliberately:
+
+- **The rail is `#161A1C`, not the mockup's `#0E1113`.** `tokens.md` wins, and
+  in it `surface-1` is literally *"painel opaco sobre capa, trilho de barra"*.
+  `#0E1113` is not a token anywhere.
+- **The ink is centred on 960/540**, not the CSS line box. The mockup sits 15 px
+  low and 8.7 px right, which is the line box plus the negative `letter-spacing`
+  applying after the last character too. That is a browser artefact, not a
+  design decision, and it does not get reproduced.
+
+`#FF8246` (`state-hot`) and `#F1F4F6` (`text-hi`) check out exactly.
+
+To see a frame without building anything:
+
+```bash
+pip install 'fonttools[woff]' pillow
+./tools/gerar-splash.py \
+    --fonte ../kyber-shell/src/assets/fonts/familjen-grotesk-400700-latin.woff2 \
+    --saida /tmp/tema --previa /tmp/splash.png --previa-fracao 0.8
+```
+
+### The initramfs, and the one way this breaks the console
+
+Plymouth runs from inside the initramfs, so **a theme that is not in the
+initramfs does not exist**. The image would build green, the files would sit in
+the right place under `/usr`, and the screen would keep showing Bazzite's
+splash.
+
+The recipe's last module is `- type: initramfs`, which regenerates it with
+`dracut --add ostree --no-hostonly --reproducible`, once per kernel, at build
+time. Last on purpose: what gets baked in is the state of the tree at that
+moment, and `plymouth-populate-initrd` decides *which* theme by consulting
+`/usr/share/plymouth/plymouthd.defaults` — the file the `files` module puts
+there.
+
+That defaults file lives in `/usr` and not in `/etc`, which is the same lesson
+as [the autologin](#the-autologin): Plymouth looks in
+`/etc/plymouth/plymouthd.conf` first and falls back to `/usr`, and a file in
+`/etc` can be deleted once and never come back. In `/usr` the OTA owns it. Its
+other three keys are Fedora's, copied verbatim, because our layer replaces the
+package's file whole.
+
+**This is the only change in the image that can stop the console from
+booting.** `dracut` does read `/usr/lib/dracut/dracut.conf.d/`, so ublue's own
+configuration is honoured, but a regenerated initramfs is a new initramfs. The
+recovery is in [Rolling back](#rolling-back), written to be executed without
+thinking, and `plymouth.enable=0` on the kernel command line is the one-boot
+test that tells you whether the splash is the culprit.
+
+What it costs:
+
+| | |
+| --- | --- |
+| Recipe | one line |
+| CI | one `dracut` per kernel — roughly +1 to +3 min on a build that takes 4 to 7 |
+| Image | `initramfs.img` becomes a file of *this* layer. `--reproducible` is what keeps its bytes still when the inputs do not move |
+| Theme | 36 KB of PNG and script, all of it copied into the initramfs |
+| On the console | **nothing.** Bazzite's documented path is `rpm-ostree initramfs --enable`, which makes the *machine* regenerate on every future update. Doing it at build time buys that back |
 
 
 ## Installation
@@ -1361,6 +1515,14 @@ curl -s http://127.0.0.1:8787/state.json | python3 -m json.tool
 for i in 1 2 3; do curl -s http://127.0.0.1:8787/state.json \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["at"])'; sleep 1; done
 
+# The splash. The theme has to be `kyber` in BOTH places: the second command
+# reads what is on disk now, and the third reads what is inside the initramfs,
+# which is what actually runs at boot. They disagree when the image shipped a
+# theme the `initramfs` module did not bake in.
+plymouth-set-default-theme
+lsinitrd /usr/lib/modules/*/initramfs.img | grep plymouth/themes
+ls -lh /usr/lib/modules/*/initramfs.img
+
 # The session entry the display manager reads
 ls /usr/share/wayland-sessions/
 
@@ -1493,6 +1655,37 @@ python3 -m json.tool /tmp/state.json
 
 ## Rolling back
 
+> [!IMPORTANT]
+> **If the console does not boot, this is the whole procedure.** It is written
+> to be executed at eleven at night without reasoning about it. The previous
+> deployment is still on disk — `rpm-ostree` keeps two — so nothing here is
+> destructive.
+>
+> **1. Get the boot menu.** Power on and tap <kbd>Esc</kbd> repeatedly from the
+> moment the firmware logo appears. GRUB is hidden behind a short timeout, not
+> disabled; tapping catches it. <kbd>Space</kbd> works on some firmware too.
+>
+> **2. Pick the second entry.** The list is newest first, so the second line is
+> the deployment from before this update. Enter boots it. Nothing is written —
+> if it boots, you have a working console again, and the rest can wait until
+> morning.
+>
+> **3. Only if you want it permanent**, once you are logged in:
+> ```bash
+> rpm-ostree rollback
+> systemctl reboot
+> ```
+>
+> **Is it the splash?** From the GRUB menu press <kbd>e</kbd> on the *first*
+> entry, find the line starting with `linux`, append ` plymouth.enable=0` at
+> its end, and press <kbd>Ctrl</kbd>+<kbd>X</kbd> to boot that once. If the
+> machine comes up, the regenerated initramfs is the cause and the rest of the
+> update is fine. Nothing is saved — the next boot is back to normal.
+>
+> **Screen black but the machine alive?** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F2</kbd>
+> gives a text console, and SSH keeps working through all of the above. Either
+> one is how you read `journalctl -b -1` to find out what happened.
+
 **To undo the last update** and boot the previous deployment:
 
 ```bash
@@ -1547,6 +1740,8 @@ published here.
 | `files/system/usr/lib/systemd/user/` | The user unit — `kyber-power`, the power verbs |
 | `files/system/usr/lib/kyber/kyberpower/` | The power piece — stdlib-only Python, runs as the session owner |
 | `files/system/usr/share/polkit-1/rules.d/` | One rule, naming one unit: who may ask for Desktop Mode |
+| `files/system/usr/share/plymouth/themes/kyber/` | Boot splash theme. The PNGs are generated, not committed |
+| `tools/gerar-splash.py` | Renders that art from kyber-shell's font, on the CI runner |
 | `files/system/usr/lib/kyber/gameprofiled/` | The state daemon — stdlib-only Python, no package |
 | `files/system/usr/share/kyber/profiles.default.json` | Factory profiles and power curve, seeded into `/var/lib/kyber/` on first run |
 | `tests/` | Unit tests for the daemon against fake sysfs trees. Not shipped in the image |
