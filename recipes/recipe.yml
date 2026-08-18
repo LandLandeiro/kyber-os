@@ -59,6 +59,14 @@ modules:
     system:
       enabled:
         - kyber-launcher.service
+        # Reescreve /etc/sddm.conf.d/zzz-kyber-autologin.conf a cada boot.
+        # O arquivo já foi conteúdo de imagem e sumiu de /etc duas vezes
+        # numa sessão — num sistema ostree a deleção é modificação local e
+        # é PRESERVADA no deploy seguinte, então ele não voltava sozinho e
+        # o console abria no Game Mode do Bazzite sem explicar por quê.
+        # Depender de um arquivo de /etc nunca ser tocado é depender de
+        # promessa que o ostree não faz.
+        - kyber-autologin.service
         # Publica /run/kyber/state.json, que o launcher lê pelo symlink
         # servido pelo darkhttpd. Sem ele a interface sobe inteira e
         # desenha SEM LEITURA — o launcher não depende do daemon para

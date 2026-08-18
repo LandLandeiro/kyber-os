@@ -1,0 +1,85 @@
+#!/usr/bin/bash
+#
+# KYBER — garante o autologin do console a cada boot.
+#
+# POR QUE ISTO É UMA UNIT, E NÃO UM ARQUIVO NA IMAGEM.
+#
+# Este arquivo já foi entregue como conteúdo de imagem, em
+# files/system/etc/sddm.conf.d/. Ele sumiu de /etc duas vezes numa
+# sessão de trabalho, e num sistema ostree isso é permanente: /etc é
+# mesclado em três vias a cada deploy e a mesclagem PRESERVA modificação
+# local, inclusive a deleção. O arquivo não volta no OTA seguinte, o
+# SDDM cai no zz-bazzite-autologin.conf e o console abre no Game Mode do
+# Bazzite sem uma linha em lugar nenhum dizendo por quê.
+#
+# Depender de um arquivo de /etc nunca ser tocado é depender de uma
+# promessa que o ostree não faz. Então o arquivo deixa de ser conteúdo
+# de imagem e passa a ser ESTADO DE BOOT, escrito por quem sabe o que
+# ele deve dizer. É exatamente a forma do bazzite-autologin, que
+# reescreve o dele a cada partida pelo mesmo motivo.
+#
+# SÓ `Session` É DEFINIDO, e de propósito. O SDDM mescla os arquivos de
+# /etc/sddm.conf.d por CHAVE e não por arquivo, em ordem alfabética de
+# nome, e o último vence. `User` continua vindo do arquivo do Bazzite,
+# que o calcula com `id -nu 1000` no boot. Escrever um segundo `User`
+# aqui criaria duas contas da mesma verdade, e no dia em que
+# discordassem o console entraria com um usuário e o Game Mode com
+# outro.
+#
+# O NOME COMEÇA COM zzz PELA ORDEM. O zz-bazzite-autologin.conf é
+# reescrito a cada boot apontando para gamescope-session-ogui-steam.desktop;
+# este precisa ordenar depois dele.
+#
+set -euo pipefail
+
+CONF='/etc/sddm.conf.d/zzz-kyber-autologin.conf'
+
+CONTEUDO='# GERADO A CADA BOOT por kyber-autologin.service — editar aqui não dura.
+# O conteúdo mora em /usr/libexec/kyber-autologin, dentro da imagem.
+[Autologin]
+Session=kyber.desktop'
+
+# MÁSCARA É DECISÃO, NÃO SUJEIRA. `ln -sf /dev/null` sobre este caminho é
+# a saída de emergência documentada no README, e quem a usou está tentando
+# entrar no desktop para consertar alguma coisa. Reescrever por cima seria
+# esta unit ganhando de quem tem as duas mãos na máquina — e, pior,
+# escrever pelo link levaria o printf e o chmod para /dev/null.
+if [[ -L ${CONF} ]]; then
+    echo "kyber-autologin: ${CONF} está mascarado (link) — nada a fazer"
+    exit 0
+fi
+
+# Existe e não é arquivo comum nem link: alguém pôs outra coisa aí. Não é
+# caso previsto, e o certo é dizer em voz alta em vez de sobrescrever.
+if [[ -e ${CONF} && ! -f ${CONF} ]]; then
+    echo "kyber-autologin: ${CONF} existe e não é arquivo comum — não mexo" >&2
+    exit 0
+fi
+
+atual=''
+[[ -f ${CONF} ]] && atual="$(< "${CONF}")"
+
+if [[ ${atual} == "${CONTEUDO}" ]]; then
+    echo "kyber-autologin: ${CONF} já dizia o que devia"
+    exit 0
+fi
+
+mkdir -p /etc/sddm.conf.d
+
+# Escrita direta, sem tmp + rename. Não há concorrência para proteger: a
+# unit ordena Before=display-manager.service, então ninguém está lendo
+# este diretório enquanto isto roda. Um .tmp deixado para trás por uma
+# queda seria PIOR que a escrita não-atômica — o SDDM lê o diretório
+# inteiro, e uma sobra chamada zzz-kyber-autologin.conf.XXXX ordenaria
+# depois do arquivo bom.
+printf '%s\n' "${CONTEUDO}" > "${CONF}"
+chmod 0644 "${CONF}"
+
+# A linha diz o que HOUVE, não o que se supõe: quem lê o journal precisa
+# distinguir "estava lá" de "sumiu e foi refeito". A segunda, repetida,
+# é a pista de que algo neste sistema apaga o arquivo.
+if [[ -z ${atual} ]]; then
+    echo "kyber-autologin: ${CONF} não existia — escrito agora"
+else
+    echo "kyber-autologin: ${CONF} tinha outro conteúdo — reescrito"
+fi

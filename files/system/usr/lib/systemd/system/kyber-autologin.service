@@ -1,0 +1,25 @@
+[Unit]
+Description=KYBER autologin — garante a sessão do console no SDDM
+Documentation=https://github.com/LandLandeiro/kyber-os
+
+# Antes do gerenciador de login, que é quem lê /etc/sddm.conf.d. Mesmo
+# ponto do bazzite-autologin.service, e pelo mesmo motivo.
+Before=display-manager.service
+
+# Depois do bazzite-autologin. A ordem alfabética dos arquivos já
+# resolveria a disputa sozinha — este ordena depois do dele — mas o
+# script do Bazzite faz `rm -f` em três arquivos daquele diretório a
+# cada boot, e escrever DEPOIS de uma limpeza é mais barato que
+# descobrir um dia que a lista dele cresceu.
+After=bazzite-autologin.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kyber-autologin
+
+# StandardOutput vai para o journal, que é onde a linha "não existia —
+# escrito agora" precisa aparecer: repetida a cada boot, ela é a prova
+# de que algo neste sistema apaga o arquivo.
+
+[Install]
+WantedBy=multi-user.target

@@ -1256,11 +1256,41 @@ daemon is publishing but the launcher is not reading — check that
 `/usr/share/kyber/launcher/state.json` is still a symlink, since that is the
 only thing joining the two.
 
-KYBER is the session that starts automatically — the image ships
-`/etc/sddm.conf.d/zzz-kyber-autologin.conf`, which sorts after the file Bazzite
-rewrites on every boot and so wins. It sets only `Session`; the username still
-comes from Bazzite's file, which resolves it at boot time. To check that the
-merge landed the way you expect:
+KYBER is the session that starts automatically.
+`kyber-autologin.service` writes `/etc/sddm.conf.d/zzz-kyber-autologin.conf` on
+**every boot**, before the display manager reads the directory. SDDM merges
+those files by key in filename order and the last one wins, so a name sorting
+after the `zz-bazzite-autologin.conf` that Bazzite rewrites each boot is what
+makes KYBER the session instead of Game Mode. It sets only `Session`; the
+username still comes from Bazzite's file, which resolves it at boot time with
+`id -nu 1000`.
+
+**That file used to be image content, and it did not survive.** It disappeared
+from `/etc` twice in one working session, and on an OSTree system that is
+permanent: `/etc` is three-way merged on every deployment and the merge
+*preserves local modifications, deletions included*. A file deleted once does
+not come back with the next OTA. The console then boots into Bazzite's Game Mode
+with nothing anywhere saying why — the same shape as every other trap in this
+README: correct behaviour from every component, and a console that is quietly
+not the console.
+
+Depending on a file in `/etc` never being touched is depending on a promise
+OSTree does not make. So the file stopped being image content and became *boot
+state*, written by the piece that knows what it should say. It is the same shape
+as `bazzite-autologin.service`, which rewrites its own file every boot for the
+same reason.
+
+The journal line is the useful part, and it says what *happened* rather than
+what was assumed:
+
+```bash
+journalctl -u kyber-autologin -b
+# "já dizia o que devia"          — the file survived the last boot
+# "não existia — escrito agora"   — something removed it. Repeated across
+#                                   boots, this is the evidence of what.
+```
+
+To check that the merge landed the way you expect:
 
 ```bash
 ls /etc/sddm.conf.d/            # zzz-kyber-* must sort last
@@ -1283,6 +1313,10 @@ To boot into the desktop instead, mask the file:
 ```bash
 sudo ln -sf /dev/null /etc/sddm.conf.d/zzz-kyber-autologin.conf
 ```
+
+A symlink there is treated as a deliberate mask: `kyber-autologin` sees it,
+says so in the journal, and writes nothing. Deleting the file instead of masking
+it does nothing — the next boot puts it back, which is the whole point.
 
 If the session fails to start, it falls back to the desktop rather than looping
 — `short_session_recover` in the session file calls `steamos-session-select
@@ -1310,6 +1344,16 @@ rpm-ostree rebase ostree-unverified-registry:ghcr.io/ublue-os/bazzite-deck:stabl
 systemctl reboot
 ```
 
+> [!NOTE]
+> **`/etc/sddm.conf.d/zzz-kyber-autologin.conf` does not leave with the image.**
+> It is written at runtime, so it is a local `/etc` modification and a rebase
+> keeps it — pointing the display manager at a `kyber.desktop` session that the
+> stock image no longer has. Remove it as part of leaving:
+>
+> ```bash
+> sudo rm -f /etc/sddm.conf.d/zzz-kyber-autologin.conf
+> ```
+
 Your home directory and anything else under `/var` survives a rebase, since
 only the OS image is being swapped. Packages you layered manually with
 `rpm-ostree install` do not carry over — reinstall them after the rebase.
@@ -1330,10 +1374,10 @@ published here.
 | `files/system/usr/share/gamescope-session-plus/sessions.d/kyber` | The KYBER session definition |
 | `files/system/usr/share/wayland-sessions/kyber.desktop` | Session entry for the display manager |
 | `files/system/usr/lib/systemd/system/` | Custom systemd units |
+| `files/system/usr/libexec/kyber-autologin` | Rewrites the SDDM autologin drop-in on every boot |
 | `files/system/usr/lib/kyber/gameprofiled/` | The state daemon — stdlib-only Python, no package |
 | `files/system/usr/share/kyber/profiles.default.json` | Factory profiles and power curve, seeded into `/var/lib/kyber/` on first run |
 | `tests/` | Unit tests for the daemon against fake sysfs trees. Not shipped in the image |
-| `files/system/etc/sddm.conf.d/` | Autologin override that makes KYBER the default session |
 | `files/scripts/` | Scripts available to the `script` module during build |
 | `files/scripts/kyber-gameprofiled.sh` | Verifies the daemon imports and creates the `state.json` symlink |
 | `modules/` | Custom BlueBuild modules specific to KYBER |
