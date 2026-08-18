@@ -30,9 +30,33 @@
 # reescrito a cada boot apontando para gamescope-session-ogui-steam.desktop;
 # este precisa ordenar depois dele.
 #
+# ---------------------------------------------------------------------
+# CONVIVENDO COM A ESCOLHA DE SESSÃO DO BAZZITE.
+#
+# O Bazzite guarda a preferência de login num arquivo-sentinela:
+#
+#   /etc/bazzite/desktop_autologin   existe  → o desktop é o padrão
+#                                    ausente → o Game Mode é o padrão
+#
+# Quem o cria é o `steamosctl set-default-login-mode desktop`, que é o
+# que o `steamos-session-select plasma-wayland-persistent` chama. Quem o
+# lê é o /usr/libexec/bazzite-autologin, que a cada boot traduz a
+# sentinela em Session= dentro do zz-bazzite-autologin.conf.
+#
+# Este script SÓ vence o PADRÃO, nunca a escolha explícita. Sem a
+# sentinela, o padrão do Bazzite é o Game Mode dele, e neste console o
+# padrão é o KYBER — escrevemos. Com a sentinela, alguém disse, no
+# vocabulário do próprio sistema, que quer o desktop; aí o arquivo do
+# KYBER SAI DA FRENTE, porque um console que ignora a preferência
+# declarada não está sendo firme, está quebrado.
+#
+# Ler a mesma sentinela que o Bazzite lê é o que evita a terceira fonte
+# de verdade. O KYBER não guarda preferência própria de sessão.
+# ---------------------------------------------------------------------
 set -euo pipefail
 
 CONF='/etc/sddm.conf.d/zzz-kyber-autologin.conf'
+SENTINELA='/etc/bazzite/desktop_autologin'
 
 CONTEUDO='# GERADO A CADA BOOT por kyber-autologin.service — editar aqui não dura.
 # O conteúdo mora em /usr/libexec/kyber-autologin, dentro da imagem.
@@ -53,6 +77,16 @@ fi
 # caso previsto, e o certo é dizer em voz alta em vez de sobrescrever.
 if [[ -e ${CONF} && ! -f ${CONF} ]]; then
     echo "kyber-autologin: ${CONF} existe e não é arquivo comum — não mexo" >&2
+    exit 0
+fi
+
+if [[ -e ${SENTINELA} ]]; then
+    if [[ -f ${CONF} ]]; then
+        rm -f "${CONF}"
+        echo "kyber-autologin: ${SENTINELA} existe — o desktop foi pedido; ${CONF} removido"
+    else
+        echo "kyber-autologin: ${SENTINELA} existe — o desktop foi pedido; nada a escrever"
+    fi
     exit 0
 fi
 

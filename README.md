@@ -58,6 +58,97 @@ browser's CORS rules block both and the screen stays blank. `darkhttpd` costs
 Fonts are embedded in the image (152 KB, SIL OFL) rather than loaded from
 Google Fonts. A console has to draw its first screen without a network.
 
+### The autologin
+
+KYBER is the session that starts automatically.
+`kyber-autologin.service` writes `/etc/sddm.conf.d/zzz-kyber-autologin.conf` on
+**every boot**, before the display manager reads the directory. SDDM merges
+those files by key in filename order and the last one wins, so a name sorting
+after the `zz-bazzite-autologin.conf` that Bazzite rewrites each boot is what
+makes KYBER the session instead of Game Mode. It sets only `Session`; the
+username still comes from Bazzite's file, which resolves it at boot time with
+`id -nu 1000`.
+
+**That file used to be image content, and it did not survive.** It disappeared
+from `/etc` twice in one working session, and on an OSTree system that is
+permanent: `/etc` is three-way merged on every deployment and the merge
+*preserves local modifications, deletions included*. A file deleted once does
+not come back with the next OTA. The console then boots into Bazzite's Game Mode
+with nothing anywhere saying why — the same shape as every other trap in this
+README: correct behaviour from every component, and a console that is quietly
+not the console.
+
+Depending on a file in `/etc` never being touched is depending on a promise
+OSTree does not make. So the file stopped being image content and became *boot
+state*, written by the piece that knows what it should say. It is the same shape
+as `bazzite-autologin.service`, which rewrites its own file every boot for the
+same reason.
+
+The journal line is the useful part, and it says what *happened* rather than
+what was assumed:
+
+```bash
+journalctl -u kyber-autologin -b
+# "já dizia o que devia"          — the file survived the last boot
+# "não existia — escrito agora"   — something removed it. Repeated across
+#                                   boots, this is the evidence of what.
+```
+
+To boot into the desktop instead, mask the file:
+
+```bash
+sudo ln -sf /dev/null /etc/sddm.conf.d/zzz-kyber-autologin.conf
+```
+
+A symlink there is treated as a deliberate mask: `kyber-autologin` sees it,
+says so in the journal, and writes nothing. Deleting the file instead of masking
+it does nothing — the next boot puts it back, which is the whole point.
+
+### Living with Bazzite's session preference
+
+Bazzite keeps the login preference in a sentinel file, and everything else is
+derived from it at boot:
+
+| Path | What it is |
+| --- | --- |
+| `/etc/bazzite/desktop_autologin` | Sentinel. Present → desktop is the default; absent → Game Mode is |
+| `/usr/libexec/bazzite-autologin` | Reads the sentinel at every boot, writes the file below |
+| `/etc/sddm.conf.d/zz-bazzite-autologin.conf` | Generated. `Session=` plus `User=$(id -nu 1000)` |
+| `~/.config/steamos-session-select` | One-shot sentinel, consumed by `startplasma-steamos-oneshot` on the next login |
+
+`steamos-session-select` is a thin shim over `/usr/libexec/os-session-select`,
+which translates a session name into `steamosctl` calls. **Its vocabulary is a
+closed list** — `plasma`, `plasma-wayland`, `plasma-x11-persistent`,
+`plasma-wayland-persistent`, `gamescope` — and anything else falls through to
+`*)`, prints `Unrecognized session` and exits 1. `kyber` is not on that list and
+neither is `desktop`, which is what `short_session_recover` had been passing
+since it was written: the escape hatch printed to a stderr nobody reads and
+returned failure. It has been corrected to `plasma`.
+
+The `-persistent` variants are the ones that call
+`steamosctl set-default-login-mode desktop` and create the sentinel; the plain
+`plasma` does not, which is why the recovery path uses it. Escaping a console
+that will not start should not also decide where it boots from then on.
+
+**KYBER only ever outranks the default, never a stated choice.**
+`kyber-autologin` reads the same sentinel Bazzite reads. Absent, Bazzite's
+default is its own Game Mode and this console's default is KYBER, so the file
+gets written. Present, somebody said in the system's own vocabulary that they
+want the desktop — and KYBER's file is *removed* instead. A console that
+overrides a declared preference is not being firm, it is broken. Reading the
+sentinel rather than keeping a preference of our own is also what keeps this
+from becoming a third source of truth.
+
+```bash
+ls -l /etc/bazzite/desktop_autologin     # present → KYBER stands aside
+journalctl -u kyber-autologin -b         # says which of the two it did
+```
+
+Because the file is rewritten at boot, **a trip to Desktop Mode is an excursion,
+not a move**: whatever the switch wrote, the next boot puts the console back.
+That is the coexistence rule in one sentence, and it is the same property that
+makes the file boot state instead of image content.
+
 ## The launcher
 
 The launcher lives in its own repository, **[kyber-shell](https://github.com/LandLandeiro/kyber-shell)**,
@@ -1256,45 +1347,14 @@ daemon is publishing but the launcher is not reading — check that
 `/usr/share/kyber/launcher/state.json` is still a symlink, since that is the
 only thing joining the two.
 
-KYBER is the session that starts automatically.
-`kyber-autologin.service` writes `/etc/sddm.conf.d/zzz-kyber-autologin.conf` on
-**every boot**, before the display manager reads the directory. SDDM merges
-those files by key in filename order and the last one wins, so a name sorting
-after the `zz-bazzite-autologin.conf` that Bazzite rewrites each boot is what
-makes KYBER the session instead of Game Mode. It sets only `Session`; the
-username still comes from Bazzite's file, which resolves it at boot time with
-`id -nu 1000`.
-
-**That file used to be image content, and it did not survive.** It disappeared
-from `/etc` twice in one working session, and on an OSTree system that is
-permanent: `/etc` is three-way merged on every deployment and the merge
-*preserves local modifications, deletions included*. A file deleted once does
-not come back with the next OTA. The console then boots into Bazzite's Game Mode
-with nothing anywhere saying why — the same shape as every other trap in this
-README: correct behaviour from every component, and a console that is quietly
-not the console.
-
-Depending on a file in `/etc` never being touched is depending on a promise
-OSTree does not make. So the file stopped being image content and became *boot
-state*, written by the piece that knows what it should say. It is the same shape
-as `bazzite-autologin.service`, which rewrites its own file every boot for the
-same reason.
-
-The journal line is the useful part, and it says what *happened* rather than
-what was assumed:
-
-```bash
-journalctl -u kyber-autologin -b
-# "já dizia o que devia"          — the file survived the last boot
-# "não existia — escrito agora"   — something removed it. Repeated across
-#                                   boots, this is the evidence of what.
-```
-
-To check that the merge landed the way you expect:
+The session that starts automatically is KYBER, and the file that decides that
+is rewritten on every boot — see [The autologin](#the-autologin) for why. To
+check that the merge landed the way you expect:
 
 ```bash
 ls /etc/sddm.conf.d/            # zzz-kyber-* must sort last
 grep -r . /etc/sddm.conf.d/     # Session=kyber.desktop, User=<you>
+journalctl -u kyber-autologin -b
 ```
 
 **On a machine you have not run this on before**, look before it writes. The
@@ -1307,21 +1367,6 @@ sudo PYTHONPATH=/usr/lib/kyber python3 -P -m gameprofiled --no-apply --once \
     --state /tmp/state.json
 python3 -m json.tool /tmp/state.json
 ```
-
-To boot into the desktop instead, mask the file:
-
-```bash
-sudo ln -sf /dev/null /etc/sddm.conf.d/zzz-kyber-autologin.conf
-```
-
-A symlink there is treated as a deliberate mask: `kyber-autologin` sees it,
-says so in the journal, and writes nothing. Deleting the file instead of masking
-it does nothing — the next boot puts it back, which is the whole point.
-
-If the session fails to start, it falls back to the desktop rather than looping
-— `short_session_recover` in the session file calls `steamos-session-select
-desktop`. That is the intended escape hatch: log into the desktop and read the
-journal.
 
 ## Rolling back
 

@@ -53,8 +53,20 @@ short_session_recover() {
     # A sessão morreu rápido demais — provavelmente o navegador não subiu.
     # Cair no desktop é melhor que entrar em laço de boot: um console que não
     # abre precisa deixar um caminho de conserto aberto.
+    #
+    # `plasma`, e não `desktop`. O argumento estava ERRADO desde que esta
+    # função existe: o steamos-session-select do Bazzite tem lista fechada de
+    # sessões — plasma, plasma-wayland, plasma-x11-persistent,
+    # plasma-wayland-persistent, gamescope — e mais nada. `desktop` caía no
+    # `*)` do case, imprimia "Unrecognized session" num stderr que ninguém lia
+    # e saía 1. A saída de emergência não existia; ela só parecia existir.
+    #
+    # `plasma` (e não a variante -persistent) porque a fuga é para CONSERTAR:
+    # a persistente grava /etc/bazzite/desktop_autologin e o console pararia
+    # de voltar sozinho no boot seguinte — trocaria um laço por um exílio.
     if command -v steamos-session-select > /dev/null; then
-        steamos-session-select desktop
+        steamos-session-select plasma || \
+            echo "kyber: steamos-session-select plasma falhou ($?)" >&2
     fi
 }
 
