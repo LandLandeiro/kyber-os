@@ -1,0 +1,24 @@
+[Unit]
+Description=KYBER — sai para o ambiente gráfico até o próximo boot
+Documentation=https://github.com/LandLandeiro/kyber-os
+
+[Service]
+Type=oneshot
+
+# A ORDEM É A ENTREGA. O ExecStart escreve o arquivo e devolve rápido,
+# então quem chamou `systemctl start` (bloqueando) recebe o status DE
+# VERDADE: escrita falhou é 1, e a tela mostra o motivo em vez de mostrar
+# "saindo…" para sempre.
+ExecStart=/usr/libexec/kyber-session-desktop
+
+# `--no-block` é o que faz o start acima devolver: sem ele o systemctl
+# ficaria esperando um reinício que mata a própria sessão de quem
+# perguntou, e o launcher nunca veria resposta nenhuma.
+#
+# ExecStartPost só roda se o ExecStart teve sucesso, então uma escrita
+# que falha NÃO derruba a sessão em troca de nada.
+ExecStartPost=/usr/bin/systemctl --no-block restart display-manager.service
+
+# Sem [Install]: esta unit não é habilitada, é ACIONADA. Quem a aciona é o
+# kyber-power, com a autorização do 50-kyber-session-desktop.rules — e uma
+# unit de energia que subisse no boot seria justamente o que ninguém quer.

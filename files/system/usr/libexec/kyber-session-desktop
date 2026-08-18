@@ -1,0 +1,77 @@
+#!/usr/bin/bash
+#
+# KYBER — sai para o ambiente gráfico até o próximo boot.
+#
+# Escreve a sessão de desktop no arquivo de autologin do KYBER e devolve.
+# Quem reinicia o display manager é o ExecStartPost da unit; quem desfaz
+# é o boot seguinte, onde o kyber-autologin reescreve kyber.desktop.
+#
+# É por isso que MODO DESKTOP é excursão e não mudança: ninguém precisa
+# lembrar de voltar.
+#
+# ---------------------------------------------------------------------
+# POR QUE NÃO `steamos-session-select plasma`, que é o caminho da casa.
+#
+# Porque ele traz duas incógnitas para dentro de um botão de menu:
+#
+#   1. o vocabulário dele é lista fechada — plasma, plasma-wayland,
+#      plasma-x11-persistent, plasma-wayland-persistent, gamescope — e
+#      `kyber` não está nela. Ele sabe sair do console; não sabe voltar
+#      para ele, então a volta ia depender de outra coisa de qualquer
+#      jeito;
+#   2. a troca escreve um drop-in próprio em /etc/sddm.conf.d (o
+#      bazzite-autologin apaga zz-steamos-autologin.conf,
+#      zz-holo-autologin.conf e steamos.conf a cada boot, que é como se
+#      sabe que algo os escreve). Qual deles, e como ele ordena contra o
+#      zzz-kyber-autologin.conf, decide se a excursão acontece ou se o
+#      SDDM volta para o KYBER — e isso é uma disputa de ORDEM
+#      ALFABÉTICA governando se um botão funciona.
+#
+# Duas incógnitas contra zero: o arquivo é nosso, já é reescrito a cada
+# boot, e escrever nele é a mesma operação que já acontece toda partida.
+#
+# A recuperação de sessão curta (short_session_recover, no sessions.d/)
+# CONTINUA usando o steamos-session-select, e a diferença é o cenário:
+# ela roda quando o console não sobe, e aí as peças do KYBER são
+# justamente as suspeitas. Fuga de emergência não deve depender de quem
+# pode estar quebrado.
+#
+set -euo pipefail
+
+CONF='/etc/sddm.conf.d/zzz-kyber-autologin.conf'
+SESSOES='/usr/share/wayland-sessions'
+
+# A sessão de desktop QUE ESTA IMAGEM TEM, perguntando ao disco em vez de
+# fixar um nome. O bazzite-deck é derivado do Kinoite e traz plasma; o
+# mesmo código serve se um dia a base for a do Silverblue. Nome fixo aqui
+# viraria um botão que abre nada, sem dizer o que faltou.
+SESSAO=''
+for candidata in plasma.desktop gnome.desktop; do
+    if [[ -f ${SESSOES}/${candidata} ]]; then
+        SESSAO="${candidata}"
+        break
+    fi
+done
+
+if [[ -z ${SESSAO} ]]; then
+    echo "kyber-session-desktop: nenhuma sessão de desktop em ${SESSOES}" >&2
+    exit 1
+fi
+
+# Máscara é decisão de quem está com as duas mãos na máquina — mesma
+# regra do kyber-autologin, e aqui ela é benigna: mascarado, o SDDM já
+# cai no padrão do Bazzite e o console já não vai voltar sozinho.
+if [[ -L ${CONF} ]]; then
+    echo "kyber-session-desktop: ${CONF} está mascarado (link) — nada a escrever"
+    exit 0
+fi
+
+mkdir -p /etc/sddm.conf.d
+printf '%s\n' \
+    '# ESCRITO POR kyber-session-desktop.service — vale só até o próximo boot.' \
+    '# No boot seguinte o kyber-autologin.service devolve Session=kyber.desktop.' \
+    '[Autologin]' \
+    "Session=${SESSAO}" > "${CONF}"
+chmod 0644 "${CONF}"
+
+echo "kyber-session-desktop: ${CONF} aponta para ${SESSAO} até o próximo boot"

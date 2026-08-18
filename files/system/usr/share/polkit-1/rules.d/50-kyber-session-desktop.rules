@@ -1,0 +1,26 @@
+/* KYBER — quem pode pedir a saída para o ambiente gráfico.
+ *
+ * O launcher roda como a pessoa da sessão e precisa acionar UMA unit de
+ * sistema: a que troca a sessão de autologin e reinicia o display
+ * manager. Isto é a autorização exata para ISSO, e para mais nada — não
+ * é `manage-units` em geral, é o nome da unit.
+ *
+ * A forma é a do próprio Bazzite, em
+ * /usr/share/polkit-1/rules.d/bazzite-autologin.rules, que autoriza o
+ * wheel a acionar o bazzite-autologin.service pelo mesmo motivo: a
+ * interface do console precisa mudar a sessão sem caixa de senha.
+ *
+ * `subject.active` fica de FORA de propósito. Ele restringiria a quem
+ * está na frente da máquina, o que soa mais apertado e é pior: quem
+ * entra por SSH para consertar um console que não abre precisa
+ * exatamente deste caminho, e o poder concedido — reiniciar o
+ * gerenciador de login de uma máquina onde a pessoa já é wheel — não é
+ * poder novo.
+ */
+polkit.addRule(function (action, subject) {
+    if (subject.isInGroup("wheel") &&
+        action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "kyber-session-desktop.service") {
+        return polkit.Result.YES;
+    }
+});

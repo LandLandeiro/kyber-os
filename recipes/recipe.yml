@@ -78,4 +78,22 @@ modules:
         # editor abre certo mesmo com esta unit fora do ar.
         - kyber-api.service
 
+    user:
+      enabled:
+        # Os quatro verbos de energia da tela 12, em 127.0.0.1:8789.
+        # É unit de USUÁRIO e não de sistema, e essa é a decisão: no
+        # logind, power-off/reboot/suspend são allow_active=yes, então
+        # quem está com a sessão ativa na frente do console já pode
+        # desligá-lo. Rodando sob o `systemd --user` da pessoa, esta peça
+        # não ganha autoridade nenhuma — empresta a dela para quem não
+        # tem teclado. Pôr energia no kyber-api teria feito o contrário:
+        # dar poder de desligar a máquina ao usuário escolhido
+        # justamente por não ter poder nenhum.
+        - kyber-power.service
+
+  # A kyber-session-desktop.service NÃO é habilitada e não aparece aqui:
+  # ela é ACIONADA pelo kyber-power, com a autorização do
+  # /usr/share/polkit-1/rules.d/50-kyber-session-desktop.rules. Unit de
+  # energia que subisse no boot seria o oposto do que se quer.
+
   - type: signing # this sets up the proper policy & signing files for signed images to work fully

@@ -25,6 +25,11 @@ screen come from this machine. The Steam side — library, cover art, downloads 
 is still the mock until Etapa 7; the two arrive separately because `useAdapter`
 composes partial implementations.
 
+The console can also be turned off from its own interface now. Screen 12's four
+verbs — poweroff, reboot, suspend, Desktop Mode — go to `kyber-power`, a user
+service running inside the session, and that is what closes Etapa 7a's
+completion criterion: a full cycle without a keyboard.
+
 What the launcher does with a daemon that is not there is not an afterthought:
 no `state.json` means SEM LEITURA, and a `state.json` whose `at` stops advancing
 means LEITURA PARADA. Both are drawn, and the second is the one worth having —
@@ -43,6 +48,7 @@ browser inside it and no desktop behind it. Three pieces make that work:
 | The launcher itself | `/usr/share/kyber/launcher/` |
 | Machine state and performance profiles | `kyber-gameprofiled.service` → `/run/kyber/state.json` |
 | Profile writes, unprivileged | `kyber-api.service` → `127.0.0.1:8788` |
+| Power verbs, inside the session | `kyber-power.service` (user) → `127.0.0.1:8789` |
 
 The session plugs into `gamescope-session-plus`, the same mechanism Bazzite's
 own Steam session uses. That framework starts gamescope and runs our
@@ -997,6 +1003,117 @@ socket, at most 8 conversations per round, and the wait is sliced at 250 ms
 because Python resumes `select` after a signal rather than returning from it
 (PEP 475) — an unsliced wait would hold SIGTERM until the next publish.
 
+## The power menu
+
+Screen 12 offers four things, and each one is a `POST` to `kyber-power` on
+`127.0.0.1:8789`:
+
+| Route | What runs |
+| --- | --- |
+| `POST /power/poweroff` | `systemctl poweroff` |
+| `POST /power/reboot` | `systemctl reboot` |
+| `POST /power/suspend` | `systemctl suspend` |
+| `POST /power/desktop` | `systemctl start kyber-session-desktop.service` |
+
+There is no read route. There is no question to ask this piece — a console's
+power state is whether the screen is on.
+
+### Why this is not part of `kyber-api`
+
+`kyber-api` already speaks HTTP, already has CORS settled and is already the
+piece the launcher reaches. It is still the wrong home, for three reasons that
+are not about taste.
+
+**It runs as a user built to have no authority.** The `kyber-api` user's entire
+power is write permission on one Unix socket: empty `CapabilityBoundingSet`,
+`SystemCallFilter=@system-service`, `IPAddressDeny=any`, no session. It is
+deliberately the least capable process in the image *because* it is the one
+taking bytes off a TCP port, and therefore the one that might be compromised.
+Teaching it to power off the machine means giving that power to the user chosen
+for having none.
+
+**Power needs no new authority at all.** logind already answers `yes` for
+`allow_active` on `power-off`, `reboot` and `suspend`. Whoever is sitting in
+front of the console with an active session can already turn it off. So the
+right home is *inside that person's session*, which is a different privilege
+domain from `kyber-api` by construction — `kyber-power` can do nothing its owner
+could not already do from a terminal. It is transport for someone with no
+keyboard, and nothing more.
+
+**A closed list is closed around a subject.** `set-profile, clear-profile` is
+auditable because there is a question to ask about it — *does this daemon need
+to do anything else with profiles?* — and the question has an answer. A list
+holding both profiles and power has no such question, so it stops being a
+boundary and becomes a menu, and the next addition meets no argument.
+
+There is a fourth, smaller reason: failure domains. Today `kyber-api` being down
+means *saving fails* and the console is otherwise whole. With power inside it,
+the same crash would also mean *the console cannot be turned off*. Two different
+criticalities behind one restart loop.
+
+### Desktop Mode is an excursion
+
+`kyber-session-desktop.service` writes the desktop session into KYBER's own
+autologin file and restarts the display manager. The next boot puts
+`Session=kyber.desktop` back, because `kyber-autologin` rewrites that file every
+boot — so nobody has to remember to come back.
+
+It is a system unit, and the session user reaches it through one polkit rule
+naming that one unit (`50-kyber-session-desktop.rules`), which is the shape
+Bazzite already uses for `bazzite-autologin.service`.
+
+**It does not delegate to `steamos-session-select`**, and the reason is that
+delegating puts two unknowns inside a menu button: that tool's closed vocabulary
+has no `kyber` in it, so coming back would need something else anyway; and the
+switch writes its own drop-in into `/etc/sddm.conf.d`, so whether the excursion
+happens at all comes down to how that filename sorts against
+`zzz-kyber-autologin.conf`. Two unknowns against zero — the file is already ours
+and is already rewritten every boot.
+
+`short_session_recover` in the session file *does* still use
+`steamos-session-select`, and the difference is the situation: it runs when the
+console will not start, and then KYBER's own pieces are the suspects. An escape
+hatch should not depend on what might be broken.
+
+### Checking it
+
+```bash
+systemctl --user status kyber-power.service
+journalctl --user -u kyber-power -b
+
+# The preflight, from the launcher's origin. Both header values must be exact.
+curl -si -X OPTIONS http://127.0.0.1:8789/power/suspend \
+    -H 'Origin: http://127.0.0.1:8787' \
+    -H 'Access-Control-Request-Method: POST' | head -8
+
+# A refusal that changes nothing: the list is closed and says what is in it.
+curl -s -X POST http://127.0.0.1:8789/power/halt \
+    -H 'Content-Type: application/json' -d '{}'
+
+# And the one that does something.
+curl -s -X POST http://127.0.0.1:8789/power/suspend \
+    -H 'Content-Type: application/json' -d '{}'
+```
+
+A `502` carries the reason verbatim from `systemctl` — `Interactive
+authentication required.` is polkit refusing, which means the session is not
+active or the process was not attributed to it. That is the one failure worth
+recognising on sight.
+
+### Rebooting into Windows is still open
+
+Screen 12 draws a **REINICIAR NO WINDOWS** row and it is a declared stub: it
+announces `NÃO IMPLEMENTADO` in the modal rather than pretending. Changing the
+UEFI boot order is its own investigation and is deliberately not mixed in here.
+
+What the research so far says: `org.freedesktop.login1.set-reboot-to-boot-loader-entry`
+is `allow_active=yes`, so on a systemd-boot machine
+`systemctl reboot --boot-loader-entry=` would need no new privilege at all. This
+image boots through GRUB, where the equivalent is `grub2-reboot`, which writes
+to `/boot/grub2/grubenv` and needs root — a different shape, and one that
+touches boot state rather than session state.
+
+
 ## Installation
 
 > [!WARNING]
@@ -1116,6 +1233,12 @@ different:
 | `ryzen_5700g` | the console: `k10temp` with no `Tdie`, and an integrated GPU that exposes **no temperature at all** |
 | `bare` | nothing. No hwmon, no card, no cpufreq |
 | `dual_gpu` | integrated and discrete together; the choice must land on the one with more VRAM |
+
+`tests/test_power.py` runs the same way and does **not** turn the laptop off:
+`kyber-power` takes its executor by injection, and the suite injects one that
+only records what would have run. It is the discipline of the daemon's
+`--no-apply` applied to a second piece — anything that acts needs a mode where
+you can watch what it would do.
 
 The three most valuable tests are the atomic write, the phase lock, and the one
 that proves a mid-game profile change does not re-capture — all three guard
@@ -1420,6 +1543,10 @@ published here.
 | `files/system/usr/share/wayland-sessions/kyber.desktop` | Session entry for the display manager |
 | `files/system/usr/lib/systemd/system/` | Custom systemd units |
 | `files/system/usr/libexec/kyber-autologin` | Rewrites the SDDM autologin drop-in on every boot |
+| `files/system/usr/libexec/kyber-session-desktop` | Points that drop-in at the desktop until the next boot |
+| `files/system/usr/lib/systemd/user/` | The user unit — `kyber-power`, the power verbs |
+| `files/system/usr/lib/kyber/kyberpower/` | The power piece — stdlib-only Python, runs as the session owner |
+| `files/system/usr/share/polkit-1/rules.d/` | One rule, naming one unit: who may ask for Desktop Mode |
 | `files/system/usr/lib/kyber/gameprofiled/` | The state daemon — stdlib-only Python, no package |
 | `files/system/usr/share/kyber/profiles.default.json` | Factory profiles and power curve, seeded into `/var/lib/kyber/` on first run |
 | `tests/` | Unit tests for the daemon against fake sysfs trees. Not shipped in the image |

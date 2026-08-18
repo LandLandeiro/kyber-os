@@ -1,0 +1,42 @@
+[Unit]
+Description=KYBER energia — os quatro verbos da tela 12
+Documentation=https://github.com/LandLandeiro/kyber-os
+
+# UNIT DE USUÁRIO, e é essa a decisão inteira. Os verbos de energia são
+# `allow_active=yes` no logind: quem está com a sessão ativa na frente do
+# console JÁ PODE desligá-lo. Rodando sob o `systemd --user` da pessoa,
+# este processo não ganha autoridade nenhuma — empresta a dela para quem
+# não tem teclado.
+#
+# O polkit atribui um processo do `user@.service` à sessão gráfica do
+# dono pelo caminho pid → uid → sd_uid_get_display()
+# (polkitbackendsessionmonitor-systemd.c). Não estar no escopo da sessão
+# não tira o allow_active.
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -P -m kyberpower
+Environment=PYTHONPATH=/usr/lib/kyber
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=2
+
+# Sem bloco de endurecimento, de propósito. No kyber-api as quinze linhas
+# de sandbox significam alguma coisa — aquele processo não deve poder
+# nada. Aqui seriam teatro: o processo roda com o uid da pessoa e a
+# fronteira está do outro lado do D-Bus, no polkit, que decide olhando a
+# SESSÃO e não o programa. Um ProtectSystem= aqui não impediria nada que
+# importa, e daria a impressão de ter impedido.
+#
+# IPAddressDeny= também fica de fora, e não por opinião: o firewall de
+# cgroup precisa de delegação de BPF que a instância de usuário não tem.
+# Linha que não vale nada mas parece valer é pior que linha nenhuma.
+
+[Install]
+# default.target, e não graphical-session.target: a sessão do KYBER é
+# gamescope-session-plus rodando um navegador, e não há garantia de que
+# alguém alcance o graphical-session.target ali dentro. Amarrar a peça de
+# desligar o console a um target que talvez ninguém ative seria trocar
+# "não dá para desligar pela interface" por "não dá para desligar pela
+# interface, e sem mensagem".
+WantedBy=default.target
