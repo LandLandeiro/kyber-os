@@ -146,6 +146,59 @@ that *means* "publish this", so a check triggered there — does `KYBER_SHELL_RE
 name this tag yet? — fires on intent and never on an ordinary commit. It inverts
 the coupling, which is why it is written down here instead of built.
 
+#### The browser cache outranks the OTA
+
+**An image that ships a new launcher does not put a new launcher on screen.**
+The console kept drawing the previous one, served from Chromium's disk cache,
+with nothing in any log to say so. It cost two investigations in one day — the
+second one *after* the cause was already known, which is what a failure with no
+signal does to you.
+
+The chain has four links and every one of them is behaving as documented:
+
+1. **OSTree does not store mtime.** Every file checked out into `/usr` gets
+   mtime 0 — 1 January 1970 — and gets it again after every OTA. It is a
+   deliberate choice: hardlinked checkouts have to compare equal.
+2. `darkhttpd` derives `Last-Modified` from `st_mtime` and sends no
+   `Cache-Control` at all. So the launcher is served as *last modified in 1970*,
+   forever.
+3. A response with a `Last-Modified` and no `Cache-Control` puts the browser on
+   **heuristic freshness**: roughly 10 % of the age since `Last-Modified`.
+   Measured from 1970 that is years, so Chromium serves from disk without
+   asking.
+4. And asking would not have helped. The validator is that same 1970 date before
+   and after the OTA, so the conditional request comes back `304 Not Modified`
+   and the browser serves the same stale body.
+
+The lie is in the protocol — the response asserts a freshness that OSTree makes
+false — so the fix is on the side that makes the assertion:
+`--header 'Cache-Control: no-store'` in `kyber-launcher.service`. It closes all
+four links at once and it holds for every client, including the `curl` calls in
+the verification section and a browser opened in Desktop Mode to debug.
+
+It costs nothing: about 1 MB of ES modules over loopback, no network in the
+path. And it removes the launcher's dependency on `cache: 'no-store'` in
+`system.js` for `state.json` — that flag stays, but it is no longer the only
+thing standing between the console and a stale reading.
+
+`--disk-cache-size=0` on the Chromium command line looks like the same fix and
+is a **no-op**: zero means *use the default size* in Chromium's disk cache
+(`SetMaxSize`: `// Zero size means use the default.`), not *do not store*. It
+would have gone in, changed nothing, and left the next person to investigate
+believing the problem had been handled.
+
+> [!IMPORTANT]
+> **A cache poisoned before this fix does not heal itself.** The entries already
+> on disk are fresh for years by the old heuristic, so the browser never issues
+> the request that would pick up the new header. On the first boot of an image
+> carrying this change, once:
+>
+> ```bash
+> rm -rf ~/.cache/chromium
+> ```
+>
+> After that the header does the work and the directory can be left alone.
+
 ### Building locally
 
 There is no local build in this repository — no Justfile, no Makefile, no
@@ -1071,9 +1124,11 @@ for a cleanup to fail.
 ### On the console
 
 ```bash
-# The server the launcher is fetched from
+# The server the launcher is fetched from. The Cache-Control line has to be
+# there: without it the browser keeps serving the launcher an OTA replaced,
+# because OSTree hands every file the same 1970 mtime forever.
 systemctl status kyber-launcher.service
-curl -I http://127.0.0.1:8787/
+curl -I http://127.0.0.1:8787/ | grep -i 'cache-control\|last-modified'
 
 # The state daemon, and what it found on this machine. The discovery lines
 # are printed once at startup and are the first thing to read when the

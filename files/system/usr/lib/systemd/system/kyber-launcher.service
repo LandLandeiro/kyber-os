@@ -20,9 +20,46 @@ Type=simple
 # 404. Nothing crashes and no log line stands out — the launcher simply keeps
 # painting the last telemetry it managed to read, which reads as a stale
 # console rather than a broken one.
+#
+# --header 'Cache-Control: no-store' NÃO É AFINAÇÃO DE DESEMPENHO. Sem ele o
+# console serve o launcher ANTIGO depois de um OTA, indefinidamente, e nada
+# acende. A cadeia é esta:
+#
+#   1. o ostree não guarda mtime: todo arquivo de /usr sai do checkout com
+#      mtime 0 — 01/01/1970 — e continua com mtime 0 depois de cada OTA;
+#   2. o darkhttpd deriva o Last-Modified do st_mtime e não manda
+#      Cache-Control nenhum (darkhttpd.c:2470-2482);
+#   3. resposta sem Cache-Control e com Last-Modified faz o navegador cair na
+#      FRESCURA HEURÍSTICA: 10 % da idade desde o Last-Modified. Com a idade
+#      medida a partir de 1970 isso dá anos, e o Chromium serve do disco sem
+#      chegar a perguntar;
+#   4. e se perguntasse não adiantaria: o validador é o mesmo Last-Modified de
+#      1970 antes e depois do OTA, então o darkhttpd responderia 304 e o
+#      navegador serviria o mesmo corpo velho.
+#
+# O erro está no PROTOCOLO — a resposta afirma uma coisa que o ostree torna
+# falsa —, então a correção é do lado que emite a afirmação. `no-store` fecha
+# os quatro passos de uma vez e vale para todo cliente, inclusive o `curl` da
+# seção de verificação e um navegador aberto no Modo Desktop para depurar.
+#
+# Custa nada: 1 MB de módulos por loopback, sem rede no meio.
+#
+# O QUE NÃO RESOLVE, e por que não foi escolhido:
+#
+#   --disk-cache-size=0 no CLIENTCMD é NO-OP. Zero quer dizer "use o tamanho
+#   padrão" no Chromium, não "não guarde" (disk_cache/blockfile/backend_impl.cc,
+#   SetMaxSize: `// Zero size means use the default.`). A flag entraria, o
+#   console continuaria igual, e o próximo a investigar acharia que já tinha
+#   sido tratado.
+#
+#   O darkhttpd não tem opção de "no-cache" — não configura cabeçalho nenhum.
+#   O que ele tem é `--header`, genérico, que anexa a linha a TODA resposta,
+#   inclusive ao 304. Exige `: ` no argumento e recusa \n; argumento
+#   malformado mata o processo no start em vez de servir errado calado.
 ExecStart=/usr/bin/darkhttpd /usr/share/kyber/launcher \
     --addr 127.0.0.1 --port 8787 \
-    --index index.html --no-listing
+    --index index.html --no-listing \
+    --header 'Cache-Control: no-store'
 Restart=always
 RestartSec=1
 
